@@ -32,7 +32,10 @@ function resolve_equations(eqs, resolved_defaults; inf_replacement=1e9)
     # This helper recursively resolves an expression 'v'.
     function resolve_value(v)
         # If v is not a symbolic expression, return it (replace Inf if needed)
-        if !(v isa SymbolicUtils.BasicSymbolic{Real})
+        #println(typeof(v))
+        if !(v isa SymbolicUtils.BasicSymbolic{Real} || v isa SymbolicUtils.BasicSymbolic{Float64}|| v isa SymbolicUtils.BasicSymbolic{Rational{Int64}}|| v isa SymbolicUtils.BasicSymbolic{Int64})
+            #println(v)
+
             return v == Inf ? inf_replacement : v
         end
 
@@ -41,7 +44,7 @@ function resolve_equations(eqs, resolved_defaults; inf_replacement=1e9)
         if !istree(v) && haskey(def, v)
             # If the default value for v is an interval, we want to keep v (so that its uncertainty is preserved)
             if def[v] isa IntervalArithmetic.Interval
-                if !any(u -> isequal(u, v), unresolved_vars)
+                if !any(u -> isequal(u, v), unresolved_vars) 
                     push!(unresolved_vars, v)
                 end
 
@@ -74,6 +77,7 @@ end
 
 function generate_compiled_functions_with_baked_params(model, resolved_eqs, unresolved_vars)
     # Create a full list of state variables (the original unknowns plus the promoted ones)
+
     full_vars = [unknowns(model)...; unresolved_vars...]
     # We'll pass [full_vars..., t] to build_function:
     all_args = [full_vars...; ModelingToolkit.t]
@@ -168,7 +172,12 @@ end
 
 function runmtk(fol)
     # Run on your defaults dictionary
+
+    #ode=ODEProblem(fol)
+    #fol=modelingtoolkitize(ode)
+
     if has_alg_equations(fol)
+        #throw("Has algrebraic equation, not supported atm.")
         eqs = equations(fol)
 
         # 3) Solve algebraic constraint (assumed to be the last eq, not right)
@@ -195,7 +204,14 @@ function runmtk(fol)
 
     check_initial_conditions(fol)
 
-    resolved_defaults = resolve_defaults(defaults(fol), model=fol)
+    df1 = defaults(fol)                               # a Dict
+    df2 = ModelingToolkit.missing_variable_defaults(fol)  # a Vector of Pairs
+    
+    # Get default initial values
+    default_values = merge(Dict(df1), Dict(df2))
+
+    resolved_defaults = resolve_defaults(default_values, model=fol)
+
     eqs, unresolved_vars = resolve_equations(full_equations(fol), resolved_defaults)
     
     compiled_functions= generate_compiled_functions_with_baked_params(fol, eqs, unresolved_vars)
@@ -206,7 +222,6 @@ function runmtk(fol)
 
     initial_values = [resolved_defaults[var] for var in var_order];
     X₀ = IntervalBox(initial_values...);#, init_p...)
-    println(X₀)
     function fol!(du, x, p, t)
         nvars = length(X₀);
         # Evaluate each derivative in order.

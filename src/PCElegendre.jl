@@ -204,7 +204,7 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
         interval(-0.4073, 1.0)     # P₁₀
     ]
     # We'll store poly_interval[m_idx] = product of intervals for that iTup
-    poly_interval = Vector{Interval{Float64}}(undef, M)
+    poly_interval = Vector{IntervalArithmetic.Interval{Float64}}(undef, M)
     for m_idx in 1:M
         iTup = all_i_tuples[m_idx]
         r = interval(1.0, 1.0)

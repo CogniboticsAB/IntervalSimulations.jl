@@ -1,0 +1,13 @@
+name = "IntervalSimulations"
+uuid = "9573e6d9-2e57-4be3-9d65-8b4e38f9a0f1"
+authors = ["Rasmus Kovacs <rasmus.kovacs@gmail.com> and contributors"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.6.7"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

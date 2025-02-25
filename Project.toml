@@ -3,7 +3,17 @@ uuid = "9573e6d9-2e57-4be3-9d65-8b4e38f9a0f1"
 authors = ["Rasmus Kovacs <rasmus.kovacs@gmail.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
+ReachabilityAnalysis = "1e97bd63-91d1-579d-8e8d-501d2b57c93f"
+SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
+Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
+
 [compat]
+ModelingToolkit = "9.64.1"
+ReachabilityAnalysis = "0.27.1"
+SymbolicUtils = "3.15.0"
+Symbolics = "6.29.1"
 julia = "1.6.7"
 
 [extras]

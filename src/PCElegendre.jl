@@ -1,11 +1,9 @@
 
-
-
 ################################################################################
 #### 1) BUILD PARAMETER COMBINATIONS, WEIGHTS  ####
 ################################################################################
 
-function build_parameter_combinations(param_dict::Dict{Num, Interval{Float64}}, p::Int)
+function build_parameter_combinations(param_dict::Dict{Num, IntervalArithmetic.Interval{Float64}}, p::Int)
     # 1) Collect the uncertain parameters into an array of (key, interval) pairs.
     param_array = collect(param_dict)  # e.g. [(:l1, 0.9..1.1), (:l2, 0.9..1.1)]
     d = length(param_array)            # number of uncertain parameters

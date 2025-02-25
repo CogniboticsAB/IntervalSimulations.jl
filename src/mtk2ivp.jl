@@ -18,7 +18,7 @@ function check_initial_conditions(sys)
 end
 
 # A version of resolve_equations that expects a vector of equations.
-function resolve_equations(eqs::Vector{Equation}, resolved_defaults; inf_replacement=1e9)
+function resolve_equations(eqs, resolved_defaults; inf_replacement=1e9)
     # Build a mapping from each LHS to its RHS.
     eq_map = Dict{Any,Any}()
     for eq in eqs

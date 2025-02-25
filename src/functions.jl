@@ -1,3 +1,3 @@
 function myOwnFunction(x)
-    println("hej", x)
+    println("hejdå", x)
 end

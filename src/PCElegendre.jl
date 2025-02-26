@@ -113,7 +113,7 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
         
         # Construct the ODEProblem using the initial condition vector and the remaining parameters.
         prob = ODEProblem(sys, ic, (ts[1], ts[2]), p_dict)
-        solutions[i] = solve(prob, saveat=save_times)
+        solutions[i] = DifferentialEquations.solve(prob, saveat=save_times)
     end
     println("Number of solutions = ", length(solutions))
 

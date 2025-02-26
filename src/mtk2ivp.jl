@@ -170,7 +170,7 @@ function resolve_defaults(dict; inf_replacement=1e9, model=nothing)
     return fully_resolved
 end
 
-function runmtk(fol)
+function createIVP(fol)
     # Run on your defaults dictionary
 
     #ode=ODEProblem(fol)
@@ -233,5 +233,5 @@ function runmtk(fol)
     # Define and solve the IVP
     order = length(X₀);
     prob = @ivp(x' = fol!(x), dim:order, x(0) ∈ X₀);
-    return (prob, var_order);
+    return (prob, unknowns(fol));
 end

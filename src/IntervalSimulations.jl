@@ -9,14 +9,14 @@ using IntervalArithmetic
 using FastGaussQuadrature
 using DifferentialEquations
 using Base.Iterators: product
+using Plots
+using Base: product
 
 include("functions.jl")
-export myOwnFunction
+export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!
 
 include("mtk2ivp.jl")
-export runmtk
+export createIVP
 
-include("PCElegendre.jl")
-export runlegendre
 
 end

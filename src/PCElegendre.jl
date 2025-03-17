@@ -17,7 +17,7 @@ function build_parameter_combinations(param_dict::Dict{Num, IntervalArithmetic.I
     unscaled_node_arrays = Vector{Vector{Float64}}(undef, d)
     keys_array           = Vector{Any}(undef, d)
 
-    Threads.@threads for j in 1:d
+    for j in 1:d
         (param_key, iv) = param_array[j]
         a, b = inf(iv), sup(iv)
         # Map [ -1,1 ] -> [ a,b ]
@@ -72,14 +72,30 @@ function build_multi_weights(d::Int, p::Int)
     return w_combined
 end
 
+function checkForParameters(fol,intresting_variables)
+    # Get all parameters from the system
+    all_params = ModelingToolkit.parameters(fol)
+
+    # Check if any interesting variable matches a parameter using isequal explicitly
+    common_params = filter(x -> any(y -> isequal(x, y), all_params), intresting_variables)
+
+    # Output result
+    if !isempty(common_params)
+        error("Cant have parameters as intresting variables, they are simply not intresting 🐱! Problem with ", common_params)
+    end
+end
+
+
 ################################################################################
 #### 2) MAIN 'run' FUNCTION  ####
 ################################################################################
 
-function runlegendre(sys, dim, ts, dt, pval, uval)
+function runlegendre(sys, dim, ts, dt, pval, intresting_variables, print)
     if dim > 10
         error("Dimensions above 10 are not supported.")
     end
+
+    checkForParameters(sys,intresting_variables)
 
     p = dim
     d = length(pval)
@@ -93,29 +109,65 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
     # 3) Solve ODE for each quadrature node
     save_times = ts[1]:dt:ts[2]
     Ngrid = length(param_combos)
+
     solutions = Vector{ODESolution}(undef, Ngrid)
     # Get the system’s state variables (the unknowns)
     # Assume uval is a dictionary mapping each state variable (unknown) to its default initial condition.
-    all_states = unknowns(sys)  # the system’s state variables
+    all_states = unknowns(sys)  # the system’s state variables    
 
-    for i in 1:Ngrid
-        # Make a mutable copy of the collocation dictionary.
+    #Initialize a standard problem to use for remakes
+    p_dict = copy(param_combos[1])
+    ic_dict = Dict{Num,Float64}()
+    for u in all_states
+        if haskey(p_dict, u)
+            ic_dict[u] = p_dict[u]
+            delete!(p_dict, u)
+        end
+    end
+    prob = ODEProblem(sys, ic_dict, (ts[1], ts[2]), p_dict)
+
+    setp! = ModelingToolkit.setp(prob, [keys(p_dict)...])
+    setu! = ModelingToolkit.setu(prob, [keys(ic_dict)...])
+    ###########################################################
+    
+    if print
+        println("Creating ",Ngrid," probs to solve")
+    end
+    a= true
+    for i in ProgressBar(1:Ngrid)
         p_dict = copy(param_combos[i])
-        ic_dict = Dict{Any,Float64}()
-        
+        ic_dict = Dict{Num,Float64}()
         for u in all_states
             if haskey(p_dict, u)
                 ic_dict[u] = p_dict[u]
                 delete!(p_dict, u)
             end
         end
-        ic = collect(ic_dict)
-        
-        # Construct the ODEProblem using the initial condition vector and the remaining parameters.
-        prob = ODEProblem(sys, ic, (ts[1], ts[2]), p_dict)
-        solutions[i] = DifferentialEquations.solve(prob, saveat=save_times)
+        #ic = collect(ic_dict)
+        # If you pass fol, you won't re-trigger codegen each time:
+        #prob = remake(prob, u0=ic, p=p_dict)
+        #problems[i] = prob
+        setp!(prob,values(p_dict))
+        setu!(prob,values(ic_dict))
+        #println(prob.ps[sys.dynamics.amplitude])
+        solutions[i] = solve(prob, saveat=save_times)
     end
-    println("Number of solutions = ", length(solutions))
+    
+    # 3) Solve the pre-built problems in parallel:
+    #solutions = Vector{ODESolution}(undef, Ngrid)
+
+
+  # if print
+  #     println("Solving ", Ngrid, " problems")
+  # end
+  # @time for i in ProgressBar(1:Ngrid)
+  #     solutions[i] = solve(problems[i], saveat=save_times)
+  # end
+
+    if print
+        println("Done solving, calculating intervals")
+    end
+    #return solutions
 
     # Standard Legendre polynomials P₀..P₁₀ on [-1,1]
     function legendre_polynomials(ξ)
@@ -136,7 +188,7 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
 
     # We'll multiply Gauss–Legendre weights by 1/2 in each dimension => (1/2)^d
     # to reflect the uniform distribution pdf on [-1,1]^d.
-    prob_weights = 0.5^d .* base_weights
+    #prob_weights = 0.5^d .* base_weights
 
     # Precompute all possible multi-indices
     all_i_tuples = collect(product((0:p for _ in 1:d)...))
@@ -159,7 +211,7 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
         return legendre_polynomials(x)[i + 1]
     end
 
-    for k in 1:Ngrid
+    @threads for k in 1:Ngrid
         ξs = nodes[k]  # each is length d
         for m_idx in 1:M
             iTup = all_i_tuples[m_idx]
@@ -177,7 +229,7 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
     # -------------------------------------------------------------------------
     # This is the same logic your loop does, just stored in a table/dict up front.
     norm_factors = zeros(M)
-    for m_idx in 1:M
+    @threads for m_idx in 1:M
         iTup = all_i_tuples[m_idx]
         nf = 1.0
         for idx in iTup
@@ -222,13 +274,15 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
     # Now we do the same logic as your original loops, but we reuse phi_table,
     # norm_factors, poly_interval, etc. so we don't recompute them inside the loops.
     # -------------------------------------------------------------------------
-    unks = unknowns(sys)
+    unk = unknowns(sys)
+    unks=Tuple([unk...,intresting_variables...])
     num_times = length(save_times)
     results = Dict{Any,Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}}}()
 
     # A place to store the partial sums for each iTup
     # (We still use the same `coeff_dict[iTup] = zeros(num_times)` logic.)
-    Threads.@threads for unk in unks
+    count = 0
+    for unk in ProgressBar(unks)
         coeff_dict = Dict{NTuple{d,Int},Vector{Float64}}()
         for iTup in all_i_tuples
             coeff_dict[iTup] = zeros(num_times)
@@ -244,8 +298,10 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
             #    => y_vals[k] = solutions[k][unk][t_idx]
             y_vals = [solutions[k][unk][t_idx] for k in 1:Ngrid]
 
+            enclosure = interval(0.0, 0.0)
+
             # 2) For each multi-index, compute the integral approximation
-            for m_idx in 1:M
+            @threads for m_idx in 1:M
                 iTup = all_i_tuples[m_idx]
                 # local_sum = Σ ( base_weights[k] * y_vals[k] * phi_table[k,m_idx] )
                 # then multiply by norm_factors[m_idx].
@@ -255,19 +311,16 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
                 # We'll keep it exactly as your code does: "include factor (1/2)"
                 # after this sum. So let's do that:
                 local_sum = 0.0
+
+                #Don't put threads here, much slower
                 for k in 1:Ngrid
                     local_sum += base_weights[k] * y_vals[k] * phi_table[k,m_idx]
                 end
                 coeff_dict[iTup][t_idx] = norm_factors[m_idx] * local_sum
             end
-        end
 
-        # Now build mean/lower/upper from these coefficients:
-        # (Your code does it in the same "for t_idx in 1:num_times" loop,
-        # but let's do it afterward for clarity.  The final result is the same.)
-        for t_idx in 1:num_times
             # sum up intervals
-            enclosure = interval(0.0, 0.0)
+            
             for m_idx in 1:M
                 iTup = all_i_tuples[m_idx]
                 a_i = coeff_dict[iTup][t_idx]
@@ -277,8 +330,17 @@ function runlegendre(sys, dim, ts, dt, pval, uval)
             upper_vals[t_idx] = sup(enclosure)
             # mean is the coefficient of the all-zero multi-index
             mean_vals[t_idx] = coeff_dict[zeroTup][t_idx]
+            #println(100*(count*num_times+t_idx)/(length(unks)*num_times), "%")
         end
+
+        # Now build mean/lower/upper from these coefficients:
+        # (Your code does it in the same "for t_idx in 1:num_times" loop,
+        # but let's do it afterward for clarity.  The final result is the same.)
         results[unk] = (mean_vals, lower_vals, upper_vals)
+        #count = count + 1
+        #if print
+        #    println(100*count/length(unks),"%")
+        #end
     end
 
     return results, save_times

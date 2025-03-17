@@ -11,12 +11,14 @@ using DifferentialEquations
 using Base.Iterators: product
 using Plots
 using Base: product
+using Base.Threads
+using ProgressBars
 
 include("functions.jl")
 export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!
 
 include("mtk2ivp.jl")
-export createIVP
+export createIVP, createIVP2
 
 
 end

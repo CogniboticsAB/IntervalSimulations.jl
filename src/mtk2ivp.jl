@@ -4,7 +4,9 @@ function check_initial_conditions(sys)
 
     df1 = defaults(sys)                               # a Dict
     df2 = ModelingToolkit.missing_variable_defaults(sys)  # a Vector of Pairs
-    
+    if !isempty(df2)
+       @warn "Missing initial values, $df2 is applied"
+    end
     # Get default initial values
     default_values = merge(Dict(df1), Dict(df2))
 
@@ -233,5 +235,104 @@ function createIVP(fol)
     # Define and solve the IVP
     order = length(X₀);
     prob = @ivp(x' = fol!(x), dim:order, x(0) ∈ X₀);
-    return (prob, unknowns(fol));
+    return (prob, unknowns(fol),1);
+end
+
+
+function createIVP2(fol, sys)
+    e = full_equations(fol)
+    d1 = defaults(fol)
+    d2 = ModelingToolkit.missing_variable_defaults(fol) 
+    if !isempty(d2)
+        @warn "Missing initial values, $d2 is applied"
+    end
+    # Get default initial values
+    d = merge(Dict(d1), Dict(d2))
+    p = ModelingToolkit.parameters(fol)
+    u = unknowns(fol)
+    new_d = Dict(k => d[k] for k in p)
+
+    filtered_d = Dict(kv for kv in new_d if !(kv.second isa IntervalArithmetic.Interval))
+    new_u= Dict(kv for kv in new_d if (kv.second isa IntervalArithmetic.Interval))
+    new_unk = keys(new_u)
+    new_unk_vals = values(new_u)
+
+    sys_unknowns = unknowns(sys)
+    fol_unknowns = unknowns(fol)
+
+    missing_in_sys = setdiff(fol_unknowns, sys_unknowns)
+    s=symbolic_linear_solve(get_alg_eqs(fol), missing_in_sys)
+    k = length(s)
+    last_k_unknowns = fol_unknowns[end - k + 1 : end]
+    nn = Dict(zip(last_k_unknowns, s))
+
+    h=Symbolics.substitute(e,nn)
+    for i in eachindex(h)
+        h[i] = simplify(h[i])
+    end
+    eqs = h[1:end-k]
+    eqs_n_1=Symbolics.fixpoint_sub(eqs,filtered_d)
+
+    obs_map = Dict()
+    for obs_eq in observed(fol)
+        # Each obs_eq looks like "lhs ~ rhs".
+        # We'll interpret it as "replace lhs with rhs".
+        obs_map[obs_eq.lhs] = obs_eq.rhs
+    end
+
+    # Now substitute them into your eqs_n so that old variables
+    # (like pend₊θ1(t)) become the new ones (like pid1₊θ(t)).
+    eqs_n = Symbolics.fixpoint_sub(eqs_n_1, obs_map)
+
+
+    first_unk=fol_unknowns[1:end-k]
+
+    all_vars = [first_unk..., new_unk...]
+    new_defaults = Dict{typeof(all_vars[1]), Any}()  # or Dict() if you don't mind the type
+    for v in all_vars
+        new_defaults[v] = d[v]
+    end
+
+    all_args = [all_vars...; ModelingToolkit.t]
+
+    compiled_functions = Vector{Any}(undef, length(all_vars))
+    resolved = Dict{Any,Any}()
+    for eq in eqs_n
+        resolved[eq.lhs] = eq.rhs
+    end
+
+    # For each variable in the full set, if it is in unresolved_vars, assign a zero derivative;
+    # otherwise, try to build its derivative function from resolved_eqs.
+    for (i, var) in enumerate(all_vars)
+        if any(u -> isequal(u, var), new_unk)
+            # For the newly promoted variable, its derivative should be zero.
+            compiled_functions[i] = Symbolics.build_function(0, all_args...; expression=false)
+        else
+            # For the original unknowns, build the derivative function.
+            key = Differential(t)(var)
+            if haskey(resolved, key)
+                rhs = resolved[key]
+                compiled_functions[i] = Symbolics.build_function(rhs, all_args...; expression=false)
+            else
+                # If no differential equation is given, default to zero.
+                compiled_functions[i] = Symbolics.build_function(0.0, all_args...; expression=false)
+            end
+        end
+    end
+
+    initial_values = [ new_defaults[v] for v in all_vars ]
+
+    X₀ = IntervalBox(initial_values...);#, init_p...)
+
+    function fol!(du, x, p, t)
+        nvars = length(X₀);
+        # Evaluate each derivative in order.
+        for i in 1:nvars
+            du[i] = compiled_functions[i](x[1:nvars]..., t) + zero(x[i]);
+        end
+    end
+
+    order = length(X₀);
+    prob = @ivp(x' = fol!(x), dim:order, x(0) ∈ X₀);
+    return (prob,unknowns(fol),2)
 end

@@ -21,17 +21,19 @@ function getIntervals(fol,pval)
     converted_new_u = Dict(Num(k) => v for (k, v) in new_u)
     intervals = merge(converted_new_u, pval)
     final_intervals = Dict(Num(k) => v for (k, v) in intervals)
+    #println(final_intervals)
     return final_intervals
 end
 ##############################################################################
 # INTERVAL
 ##############################################################################
 
-function solveInterval(prob, tspan; var_dict=Dict(), dt=0.01, dim=4, solver=TMJets21b(), intresting_variables = [], print = false)
+function solveInterval(prob, tspan; var_dict=Dict(), dt=0.01, dim=4, solver=TMJets21b(), intresting_variables = [], print = false, pce_solver = Rodas5())
     if prob isa ODESystem
         println("Legendre")
         # Suppose runlegendre returns (solutionDict, timeVector), or something similar
-        pce_sol, ts = runlegendre(prob, dim, tspan, dt, getIntervals(prob,var_dict), intresting_variables, print)
+        pce_sol, ts =  run_pce_interval_analysis(prob, dim, tspan, dt, getIntervals(prob,var_dict), intresting_variables, print, pce_solver)
+        #pce_sol, ts =  runlegendre(prob, dim, tspan, dt, getIntervals(prob,var_dict), intresting_variables, print)
         #return pce_sol
         # You can store the unknowns(prob) in a variables list if you want
         vars = Tuple([unknowns(prob)...,intresting_variables...])

@@ -260,19 +260,6 @@ function createIVP2(fol, sys)
     sys_unknowns = unknowns(sys)
     fol_unknowns = unknowns(fol)
 
-    missing_in_sys = setdiff(fol_unknowns, sys_unknowns)
-    s=symbolic_linear_solve(get_alg_eqs(fol), missing_in_sys)
-    k = length(s)
-    last_k_unknowns = fol_unknowns[end - k + 1 : end]
-    nn = Dict(zip(last_k_unknowns, s))
-
-    h=Symbolics.substitute(e,nn)
-    for i in eachindex(h)
-        h[i] = simplify(h[i])
-    end
-    eqs = h[1:end-k]
-    eqs_n_1=Symbolics.fixpoint_sub(eqs,filtered_d)
-
     obs_map = Dict()
     for obs_eq in observed(fol)
         # Each obs_eq looks like "lhs ~ rhs".
@@ -280,9 +267,30 @@ function createIVP2(fol, sys)
         obs_map[obs_eq.lhs] = obs_eq.rhs
     end
 
+    missing_in_sys = setdiff(fol_unknowns, sys_unknowns)
+    alg_eqs1 = get_alg_eqs(fol)
+    alg_eqs=Symbolics.fixpoint_sub(alg_eqs1,obs_map)
+    s=symbolic_linear_solve(alg_eqs, missing_in_sys)
+    k = length(s)
+    last_k_unknowns = fol_unknowns[end - k + 1 : end]
+
+    new_var_obs = missing_in_sys .~ s
+
+    nn = Dict(zip(last_k_unknowns, s))
+
+    h=Symbolics.substitute(e,nn)
+    h=h[1:end-k]
+    for i in eachindex(h)
+        h[i] = simplify(h[i])
+    end
+    eqs = h
+    eqs_n=Symbolics.fixpoint_sub(eqs,filtered_d)
+
+
+    #oos=Symbolics.substitute(oos,obs_map)
     # Now substitute them into your eqs_n so that old variables
     # (like pend₊θ1(t)) become the new ones (like pid1₊θ(t)).
-    eqs_n = Symbolics.fixpoint_sub(eqs_n_1, obs_map)
+    #eqs_n = Symbolics.fixpoint_sub(eqs_n_1, obs_map)
 
 
     first_unk=fol_unknowns[1:end-k]

@@ -529,8 +529,11 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
                           interval(-1.0,1.0), interval(-0.4097,1.0), interval(-1.0,1.0),
                           interval(-0.4073,1.0)]
 
-    poly_interval = [prod(legendre_intervals[i+1] for i in multi_idx) for multi_idx in multi_indices]
-    #println(poly_interval)
+    poly_interval = [prod(legendre_intervals[i+1] for i in multi_idx) for multi_idx in multi_indices] ## Här borde ju bli wrapping? Borde göra något mer avancerat för att bli av med det?
+    #Eventuellt faktiskt gör symboliska beräkningar på legendre polynomen och sen hitta max och min på intervallet?
+
+    ## Så även om xi_s 'r oberoende. So  
+
     zero_multi_idx = ntuple(_->0, d)
 
     unks = Tuple(vcat(unknowns(sys), interesting_vars))

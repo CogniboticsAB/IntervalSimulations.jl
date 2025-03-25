@@ -13,6 +13,7 @@ using Plots
 using Base: product
 using Base.Threads
 using ProgressBars
+using IntervalOptimisation
 
 include("functions.jl")
 export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!

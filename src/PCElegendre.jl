@@ -425,7 +425,7 @@ end
 
 # Generate total-degree multi-indices
 function generate_total_degree_multi_indices(d, p)
-    return [i for i in Iterators.product((0:p for _ in 1:d)...) if sum(i) <= p+1]
+    return [i for i in Iterators.product((0:p for _ in 1:d)...) if sum(i) <= p]
 end
 
 # Main function for Polynomial Chaos Expansion interval analysis
@@ -438,7 +438,7 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
 
     
     d = length(param_intervals)
-    poly_order = d
+    poly_order = d+1
 
     collocation_nodes, xi_nodes = generate_collocation_nodes(param_intervals, poly_order)
     quadrature_weights = generate_quadrature_weights(d, poly_order)

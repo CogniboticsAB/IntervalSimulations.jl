@@ -271,15 +271,42 @@ function plotScanning!(
     alpha=0.5
 )
     label_str=""
-    if idxs isa String
+    times = scanning_solutions.solutions[1].t
+    max1 = zeros(length(times))
+    min1 = zeros(length(times))
+    max2 = zeros(length(times))
+    min2 = zeros(length(times))
+    
+    if idxs isa Num
         label_str = idxs
+        for (j, time) in enumerate(times)
+            max1[j] = maximum(scanning_solutions.solutions[i][label_str][j] for i in 1:length(scanning_solutions.solutions))
+            min1[j] = minimum(scanning_solutions.solutions[i][label_str][j] for i in 1:length(scanning_solutions.solutions))
+        end
+        
+        plot!(plt,times,max1, label = "Maximum of$(label_str)")
+        plot!(plt,times,min1,  label = "Minimum of$(label_str)")
     elseif idxs isa Tuple{Int64, Int64}
         if idxs[1] == 0
             arg1 = "t"
             arg2 = scanning_solutions.varnames[idxs[2]]
+            for (j, time) in enumerate(times)
+                max1[j] = maximum(scanning_solutions.solutions[i][arg2][j] for i in 1:length(scanning_solutions.solutions))
+                min1[j] = minimum(scanning_solutions.solutions[i][arg2][j] for i in 1:length(scanning_solutions.solutions))
+            end
+            plot!(plt,times,max1)
+            plot!(plt,times,min1)
         else
             arg1 = scanning_solutions.varnames[idxs[1]]
             arg2 = scanning_solutions.varnames[idxs[2]]
+            for (j, time) in enumerate(times)
+                max1[j] = maximum(scanning_solutions.solutions[i][arg1][j] for i in 1:length(scanning_solutions.solutions))
+                min1[j] = minimum(scanning_solutions.solutions[i][arg1][j] for i in 1:length(scanning_solutions.solutions))
+                max2[j] = maximum(scanning_solutions.solutions[i][arg2][j] for i in 1:length(scanning_solutions.solutions))
+                min2[j] = minimum(scanning_solutions.solutions[i][arg2][j] for i in 1:length(scanning_solutions.solutions))
+            end
+            plot!(plt,min1,min2)
+            plot!(plt,max1,max2)
         end
         label_str = "$(arg2) vs $(arg1)"
     end
@@ -287,13 +314,14 @@ function plotScanning!(
     println(label_str)
     first_solution = true
 
+
     for sol in scanning_solutions.solutions
         # Only label the first line:
         local_label = first_solution ? label_str : ""
         first_solution = false
 
         # The DiffEqRecipes: pass `idxs=idxs` to choose which variables to plot
-        plot!(plt, sol; idxs=idxs, color=color, alpha=alpha, label=local_label)
+        #plot!(plt, sol; idxs=idxs, color=color, alpha=alpha, label=local_label)
     end
     return plt
 end

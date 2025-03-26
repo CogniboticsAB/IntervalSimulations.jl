@@ -286,6 +286,9 @@ function createIVP2(fol, sys)
     eqs = h
     eqs_n=Symbolics.fixpoint_sub(eqs,filtered_d)
 
+    for i in eachindex(h)
+        eqs_n[i] = simplify(eqs_n[i])
+    end
 
     #oos=Symbolics.substitute(oos,obs_map)
     # Now substitute them into your eqs_n so that old variables

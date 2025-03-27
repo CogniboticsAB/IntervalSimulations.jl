@@ -9,7 +9,8 @@ end
 
 struct ScanningSolutions
     solutions::Vector{ODESolution}
-    varnames::Tuple{Vararg{Num}} 
+    varnames::Tuple{Vararg{Num}}
+    meta
 end
 
 function getIntervals(fol,pval)
@@ -28,30 +29,31 @@ end
 # INTERVAL
 ##############################################################################
 
-function solveInterval(prob, tspan; var_dict=Dict(), dt=0.01, dim=4, solver=TMJets21b(), intresting_variables = [], print = false, pce_solver = Rodas5())
+function solveInterval(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2, solver=TMJets21b(), intresting_variables = [], print = false, pce_solver = Rodas5(), extra_callocation = 0)
     if prob isa ODESystem
         println("Legendre")
         # Suppose runlegendre returns (solutionDict, timeVector), or something similar
-        pce_sol, ts =  run_pce_interval_analysis(prob, dim, tspan, dt, getIntervals(prob,var_dict), intresting_variables, print, pce_solver)
+        param_intervals = getIntervals(prob,var_dict)
+        pce_sol, ts, number_of_callocation_nodes =  run_pce_interval_analysis(prob, poly_order, tspan, dt, param_intervals, intresting_variables, print, pce_solver, extra_callocation=extra_callocation)
         #pce_sol, ts =  runlegendre(prob, dim, tspan, dt, getIntervals(prob,var_dict), intresting_variables, print)
         #return pce_sol
         # You can store the unknowns(prob) in a variables list if you want
         vars = Tuple([unknowns(prob)...,intresting_variables...])
-        return IntervalSolution(pce_sol, vars, ts, :pce)
+        return IntervalSolution(pce_sol, vars, ts, Dict(:type=>:pce, :poly_order => poly_order, :dt=>dt,:param_intervals =>param_intervals,:solver => pce_solver, :intresting_variables=> intresting_variables,:number_of_callocation_nodes=>number_of_callocation_nodes, :problem =>prob))
     elseif (prob isa Tuple && prob[1] isa InitialValueProblem && prob[3]==1)
         println("IVP / Reachability 1")
         ra_sol = ReachabilityAnalysis.solve(prob[1], tspan=(tspan[1], tspan[2]), solver)
         save_times = tspan[1]:dt:tspan[2]
         # prob[2] might be the symbol list or variable set you want
         vars = prob[2]
-        return IntervalSolution(ra_sol, vars, save_times, :reach)
+        return IntervalSolution(ra_sol, vars, save_times, Dict(:type=>:reach))
     elseif (prob isa Tuple && prob[1] isa InitialValueProblem && prob[3]==2)
         println("IVP / Reachability 2")
         ra_sol = ReachabilityAnalysis.solve(prob[1], tspan=(tspan[1], tspan[2]), solver)
         save_times = tspan[1]:dt:tspan[2]
         # prob[2] might be the symbol list or variable set you want
         vars = prob[2]
-        return IntervalSolution(ra_sol, vars, save_times, :reach)
+        return IntervalSolution(ra_sol, vars, save_times, Dict(:type=>:reach,:solver => solver, :problem => prob[1], :dt => dt))
     else
         error("solveInterval: unrecognized problem type")
     end
@@ -64,7 +66,7 @@ function intervalPlot(intervalsol::IntervalSolution; idxs=(0,1))
 end
 
 function intervalPlot!(fig, intervalsol::IntervalSolution; idxs=(0,1))
-    if intervalsol.kind == :reach
+    if intervalsol.kind[:type] == :reach
         @info "Plotting ReachabilityAnalysis solution"
         # Since `intervalsol.sol` is a ReachSolution, we can do
         # plot!(..., idxs=...) just like ODESolution’s recipe, but it’s slightly different:
@@ -81,7 +83,7 @@ function intervalPlot!(fig, intervalsol::IntervalSolution; idxs=(0,1))
             label=false
         )
 
-    elseif intervalsol.kind == :pce
+    elseif intervalsol.kind[:type] == :pce
         @info "Plotting Legendre/PCE solution"
         # This is a dictionary-of-mean/lower/upper for each variable => (m, l, u).
         # We need to interpret `idxs`. If the user gave us:
@@ -233,7 +235,7 @@ function solveScanning(sys, tspan, grid_size; var_dict=Dict(), dt = 0.01, intres
         println("Progress: ", round(i/total*100, digits=2), " %")
     end
     labels = Tuple([unknowns(sys)..., intresting_variables...])
-    return ScanningSolutions(solutions, labels)
+    return ScanningSolutions(solutions, labels, Dict(:problem =>sys,:ts=>tspan, :grid_size =>grid_size))
 end
 
 

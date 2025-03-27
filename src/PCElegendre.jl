@@ -80,7 +80,7 @@ function generate_total_degree_multi_indices(d, p)
 end
 
 # Main function for Polynomial Chaos Expansion interval analysis
-function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interesting_vars, verbose, solver)
+function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interesting_vars, verbose, solver; extra_callocation = 0)
     if dim > 10
         error("Dimensions above 10 are not supported.")
     end
@@ -89,11 +89,11 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
 
     
     d = length(param_intervals)
-    poly_order = 2
-
-    collocation_nodes, xi_nodes = generate_collocation_nodes(param_intervals, poly_order)
+    poly_order = dim
+    number_of_callocation_nodes = poly_order+extra_callocation
+    collocation_nodes, xi_nodes = generate_collocation_nodes(param_intervals, poly_order+extra_callocation)
     
-    quadrature_weights = generate_quadrature_weights(d, poly_order)
+    quadrature_weights = generate_quadrature_weights(d, poly_order+extra_callocation)
     #quadrature_weights= 0.5^d .* quadrature_weights
     #println(collocation_nodes)
     #println(length(collocation_nodes))
@@ -187,7 +187,7 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
                           interval(-0.4286,1.0), interval(-1.0,1.0), interval(-0.4147,1.0),
                           interval(-1.0,1.0), interval(-0.4097,1.0), interval(-1.0,1.0),
                           interval(-0.4073,1.0)]
-    println(multi_indices)
+    #println(multi_indices)
     poly_interval = [prod(legendre_intervals[i+1] for i in multi_idx) for multi_idx in multi_indices] ## Här borde ju bli wrapping? Borde göra något mer avancerat för att bli av med det?
     #Eventuellt faktiskt gör symboliska beräkningar på legendre polynomen och sen hitta max och min på intervallet?
     #println(phi_table[1,10])
@@ -248,7 +248,7 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
 
             for m_idx in 1:M
                 multi_idx = multi_indices[m_idx]
-                enclosure += coeff_dict[multi_idx][t_idx] * poly_interval[m_idx]# poly_interval_map[multi_idx]
+                enclosure += coeff_dict[multi_idx][t_idx] *poly_interval[m_idx] # poly_interval_map[multi_idx]
             end
 
             lower_vals[t_idx] = inf(enclosure)
@@ -258,5 +258,5 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
         results[unk] = (mean_vals, lower_vals, upper_vals)
     end
     
-    return results, save_times
+    return results, save_times, number_of_callocation_nodes
 end

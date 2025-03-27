@@ -269,7 +269,9 @@ function createIVP2(fol, sys)
 
     missing_in_sys = setdiff(fol_unknowns, sys_unknowns)
     alg_eqs1 = get_alg_eqs(fol)
-    alg_eqs=Symbolics.fixpoint_sub(alg_eqs1,obs_map)
+    l = length(alg_eqs1)
+    alg_eqs=e[end-l+1:end]
+    #alg_eqs=Symbolics.fixpoint_sub(alg_eqs1,obs_map)
     s=symbolic_linear_solve(alg_eqs, missing_in_sys)
     k = length(s)
     last_k_unknowns = fol_unknowns[end - k + 1 : end]
@@ -305,11 +307,12 @@ function createIVP2(fol, sys)
     end
 
     all_args = [all_vars...; ModelingToolkit.t]
-
+    println(all_args)
     compiled_functions = Vector{Any}(undef, length(all_vars))
     resolved = Dict{Any,Any}()
     for eq in eqs_n
         resolved[eq.lhs] = eq.rhs
+        println(eq.lhs, "=> ",eq.rhs)
     end
 
     # For each variable in the full set, if it is in unresolved_vars, assign a zero derivative;
@@ -334,7 +337,7 @@ function createIVP2(fol, sys)
     initial_values = [ new_defaults[v] for v in all_vars ]
 
     X₀ = IntervalBox(initial_values...);#, init_p...)
-
+    println(X₀)
     function fol!(du, x, p, t)
         nvars = length(X₀);
         # Evaluate each derivative in order.

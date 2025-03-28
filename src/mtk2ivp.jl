@@ -239,7 +239,107 @@ function createIVP(fol)
 end
 
 
-function createIVP2(fol, sys)
+# These are the same "cleanup" tools from before.
+# Make sure the pattern doesn't cause PCRE errors:
+function remove_t_and_pluses(substring::AbstractString)
+    no_t = replace(String(substring), r"\(t\)" => "")
+    pat = r"((?:[0-9Ee.\+\-]+)?)(?:[A-Za-z0-9]+₊){1,}([A-Za-z0-9]+)"
+    result = replace(no_t, pat => (match_sub::AbstractString) -> begin
+        mm = match(pat, match_sub)
+        mm === nothing && return match_sub
+        return mm.captures[1] * mm.captures[2]
+    end)
+    return result
+end
+
+function clean_equation_lhs(lhs_str::AbstractString)
+    pat = r"^Differential\(t\)\((.*)\)$"
+    m = match(pat, lhs_str)
+    if m !== nothing
+        inside = m.captures[1]
+        inside_cleaned = remove_t_and_pluses(inside)
+        return "Differential(t)(" * inside_cleaned * ")"
+    else
+        return remove_t_and_pluses(lhs_str)
+    end
+end
+
+function clean_equation_rhs(rhs_str::AbstractString)
+    out = remove_t_and_pluses(rhs_str)
+
+    # 1) Insert `*` after a digit if next char is '('
+    out = replace(out, r"(?<=[0-9])(?=\()" => "*")
+
+    # 2) Insert `*` after a digit if next char is letterlike
+    #    (including Greek letters).  We use `(?<=[0-9])(?=[^\W\d_])`
+    #    so that it excludes punctuation, digits, underscores, etc.
+    out = replace(out, r"(?<=[0-9])(?=[^\W\d_])" => "*")
+
+    # 3) Convert any remaining Unicode to ASCII approximations
+    out = unidecode(out)
+    return out
+end
+
+"""
+    print_matlab_simplify_batch(eqs_n::Vector{Equation}, all_vars;
+                                vpa_digits::Int=10,
+                                print_vpa::Bool=true)
+
+Given a list of final equations `eqs_n` and the `all_vars`
+(e.g. `[phi(t), w(t), c, d]`) from Julia, this function:
+
+1) Extracts the variable names automatically from `all_vars`.
+2) Prints a single line of the form:
+      syms phi w c d
+   with any leftover Unicode replaced via unidecode.
+3) For each equation eq_i, prints:
+      eq1 = <cleaned RHS>;
+      eq1_s = simplify(eq1);
+   If `print_vpa=true`, it also prints:
+      eq1_sf = vpa(eq1_s, 10);
+
+The user can copy‐paste into MATLAB. By default, `vpa_digits=10`.
+If you set `print_vpa=false`, it won't print the vpa lines.
+"""
+function print_matlab_simplify_batch(eqs_n::Vector{Equation}, all_vars,
+                                     vpa_digits)
+    # 1) Gather all variable names from all_vars, e.g. [phi(t), w(t), c, d].
+    #    Then remove plus-chains, remove (t).
+    varnames = String[]
+    for v in all_vars
+        raw = string(v)
+        cleaned = remove_t_and_pluses(raw)
+        # Also unidecode them in case they contain Greek letters
+        cleaned = unidecode(cleaned)
+        push!(varnames, cleaned)
+    end
+
+    # Make them unique & sorted for consistent output
+    unique_vars = sort(unique(varnames))
+
+    # 2) Print the syms line
+    syms_line = "syms " * join(unique_vars, " ")
+    println("\n# ------ MATLAB code for simplification ------")
+    println(syms_line)
+
+    # 3) For each eq in eqs_n, we create eq$i = <rhs>
+    #    eq$i_s = simplify(eq$i)
+    #    (optionally) eq$i_sf = vpa(eq$i_s, vpa_digits)
+    for (i, eq) in enumerate(eqs_n)
+        # Clean & unidecode the RHS
+        rhs_str = clean_equation_rhs(string(eq.rhs))
+        eqname = "eq$(i)"
+
+        println(eqname, " = ", rhs_str, ";")
+        println(eqname, "_s = simplify(", eqname, ");")
+        println(eqname, "_sf = vpa(", eqname, "_s, ", vpa_digits, ");")
+        
+    end
+
+    println("# ------ End of MATLAB snippet ------\n")
+end
+
+function createIVP2(fol, sys; vpa_digits = 10, print_matlab = false)
     e = full_equations(fol)
     d1 = defaults(fol)
     d2 = ModelingToolkit.missing_variable_defaults(fol) 
@@ -307,14 +407,18 @@ function createIVP2(fol, sys)
     end
 
     all_args = [all_vars...; ModelingToolkit.t]
-    println(all_args)
+    #println(all_args)
     compiled_functions = Vector{Any}(undef, length(all_vars))
     resolved = Dict{Any,Any}()
+
+
+    # Print cleaned equations
     for eq in eqs_n
         resolved[eq.lhs] = eq.rhs
-        println(eq.lhs, "=> ",eq.rhs)
     end
-
+    if print_matlab
+        print_matlab_simplify_batch(eqs_n, all_vars, vpa_digits)
+    end
     # For each variable in the full set, if it is in unresolved_vars, assign a zero derivative;
     # otherwise, try to build its derivative function from resolved_eqs.
     for (i, var) in enumerate(all_vars)
@@ -337,7 +441,7 @@ function createIVP2(fol, sys)
     initial_values = [ new_defaults[v] for v in all_vars ]
 
     X₀ = IntervalBox(initial_values...);#, init_p...)
-    println(X₀)
+    #println(X₀)
     function fol!(du, x, p, t)
         nvars = length(X₀);
         # Evaluate each derivative in order.

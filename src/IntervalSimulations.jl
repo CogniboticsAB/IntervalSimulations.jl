@@ -14,6 +14,7 @@ using Base: product
 using Base.Threads
 using ProgressBars
 using IntervalOptimisation
+using Unidecode
 
 include("functions.jl")
 export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!

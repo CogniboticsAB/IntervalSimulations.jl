@@ -1,3 +1,4 @@
+#PCElegendre.jl
 # Generate collocation nodes and quadrature weights
 function generate_collocation_nodes(param_intervals::Dict{Num, IntervalArithmetic.Interval{Float64}}, poly_order::Int)
     param_array = collect(param_intervals)
@@ -191,38 +192,7 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
     poly_interval = [prod(legendre_intervals[i+1] for i in multi_idx) for multi_idx in multi_indices] ## Här borde ju bli wrapping? Borde göra något mer avancerat för att bli av med det?
     #Eventuellt faktiskt gör symboliska beräkningar på legendre polynomen och sen hitta max och min på intervallet?
     #println(phi_table[1,10])
-    println(poly_interval)
-    poly_interval_map = Dict{NTuple{d, Int}, IntervalArithmetic.Interval{Float64}}()
-    # Degree 0
-    poly_interval_map[(0, 0)] = interval(1.0)
-
-    # Degree 1
-    poly_interval_map[(1, 0)] = interval(-1.0, 1.0)
-    poly_interval_map[(0, 1)] = interval(-1.0, 1.0)
-
-    # Degree 2
-    poly_interval_map[(2, 0)] = interval(-0.5, 1.0)
-    poly_interval_map[(0, 2)] = interval(-0.5, 1.0)
-    poly_interval_map[(1, 1)] = interval(0.0, 1.0)
-
-    # Degree 3
-    poly_interval_map[(3, 0)] = interval(-1.0, 1.0)
-    poly_interval_map[(0, 3)] = interval(-1.0, 1.0)
-    poly_interval_map[(2, 1)] = interval(-1.0, 1.0)
-    poly_interval_map[(1, 2)] = interval(-1.0, 1.0)
-
-    # Degree 4
-    poly_interval_map[(4, 0)] = interval(-0.438571, 1.0)
-    poly_interval_map[(0, 4)] = interval(-0.438571, 1.0)
-    poly_interval_map[(3, 1)] = interval(-0.225, 1.0)  
-    poly_interval_map[(1, 3)] = interval(-0.225, 1.0)  
-    poly_interval_map[(2, 2)] = interval(0.0, 1.0)    
-
-    #Degree 5
-    poly_interval_map[(2, 3)] = interval(-1.0, 1.0)
-    poly_interval_map[(3, 2)] = interval(-1.0, 1.0)
-    poly_interval_map[(3, 3)] = interval(0.0, 1.0)  
-    # ... and so on
+    #println(poly_interval)
 
     ## Så även om xi_s 'r oberoende. So  
 
@@ -259,4 +229,117 @@ function run_pce_interval_analysis(sys, dim, tspan, dt, param_intervals, interes
     end
     
     return results, save_times, number_of_callocation_nodes
+end
+
+function solve_pce(sys, dim, tspan, dt, param_intervals, verbose, solver; extra_callocation=0)
+    if dim > 10
+        error("Dimensions above 10 are not supported.")
+    end
+
+    d = length(param_intervals)
+    poly_order = dim
+    collocation_nodes, xi_nodes = generate_collocation_nodes(param_intervals, poly_order+extra_callocation)
+    quadrature_weights = generate_quadrature_weights(d, poly_order+extra_callocation)
+    save_times = tspan[1]:dt:tspan[2]
+    N_nodes = length(collocation_nodes)
+    solutions = Vector{ODESolution}(undef, N_nodes)
+
+    all_states = unknowns(sys)
+    for i in ProgressBar(1:N_nodes)
+        p_dict = copy(collocation_nodes[i])
+        ic_dict = Dict{Num, Float64}()
+        for u in all_states
+            if haskey(p_dict, u)
+                ic_dict[u] = p_dict[u]
+                delete!(p_dict, u)
+            end
+        end
+        prob = ODEProblem(sys, ic_dict, (tspan[1], tspan[2]), p_dict)
+        solutions[i] = solve(prob, solver, saveat=save_times)
+    end
+
+    for k in 1:N_nodes
+        if solutions[k].retcode != :Success
+            error("Solver failed for collocation index $k. retcode=$(solutions[k].retcode)")
+        end
+    end
+
+    return (solutions = solutions,
+            xi_nodes = xi_nodes,
+            collocation_nodes = collocation_nodes,
+            quadrature_weights = quadrature_weights,
+            save_times = save_times,
+            d = d,
+            poly_order = poly_order,
+            extra_callocation = extra_callocation,
+            sys = sys)
+end
+
+function calculate_bounds_pce(data, interesting_vars)
+    sys = data.kind[:problem]
+    d = data.sol.d
+    poly_order = data.sol.poly_order
+    xi_nodes = data.sol.xi_nodes
+    quadrature_weights = data.sol.quadrature_weights
+    solutions = data.sol.solutions
+    save_times = data.sol.save_times
+
+    validate_interesting_variables(sys, interesting_vars)
+
+    multi_indices = generate_total_degree_multi_indices(d, poly_order)
+    M = length(multi_indices)
+    N_nodes = length(solutions)
+
+    phi_table = Matrix{Float64}(undef, N_nodes, M)
+    @threads for k in 1:N_nodes
+        ξs = xi_nodes[k]
+        for m_idx in 1:M
+            multi_idx = multi_indices[m_idx]
+            phi_table[k, m_idx] = prod(legendre_polynomials(ξs[i])[multi_idx[i]+1] for i in 1:d)
+        end
+    end
+
+    norm_factors = zeros(M)
+    @threads for m_idx in 1:M
+        multi_idx = multi_indices[m_idx]
+        norm_factors[m_idx] = prod(((2*i + 1)/2) for i in multi_idx)
+    end
+
+    legendre_intervals = [interval(1.0), interval(-1.0, 1.0), interval(-0.5, 1.0),
+                          interval(-1.0, 1.0), interval(-0.4286, 1.0), interval(-1.0, 1.0),
+                          interval(-0.4147, 1.0), interval(-1.0, 1.0), interval(-0.4097, 1.0),
+                          interval(-1.0, 1.0), interval(-0.4073, 1.0)]
+    poly_interval = [prod(legendre_intervals[i+1] for i in multi_idx) for multi_idx in multi_indices]
+
+    zero_multi_idx = ntuple(_ -> 0, d)
+
+    unks = Tuple(vcat(unknowns(sys), interesting_vars))
+    num_times = length(save_times)
+    results = Dict{Any, Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}}}()
+
+    for unk in ProgressBar(unks)
+        coeff_dict = Dict(multi_idx => zeros(num_times) for multi_idx in multi_indices)
+        mean_vals = zeros(num_times)
+        lower_vals = zeros(num_times)
+        upper_vals = zeros(num_times)
+
+        for t_idx in 1:num_times
+            y_vals = [solutions[k][unk][t_idx] for k in 1:N_nodes]
+            enclosure = interval(0.0, 0.0)
+            @threads for m_idx in 1:M
+                local_sum = sum(quadrature_weights[k] * y_vals[k] * phi_table[k, m_idx] for k in 1:N_nodes)
+                coeff_dict[multi_indices[m_idx]][t_idx] = norm_factors[m_idx] * local_sum
+            end
+            for m_idx in 1:M
+                enclosure += coeff_dict[multi_indices[m_idx]][t_idx] * poly_interval[m_idx]
+            end
+            lower_vals[t_idx] = inf(enclosure)
+            upper_vals[t_idx] = sup(enclosure)
+            mean_vals[t_idx] = coeff_dict[zero_multi_idx][t_idx]
+        end
+
+        results[unk] = (mean_vals, lower_vals, upper_vals)
+    end
+
+    return results, save_times, poly_order + data.sol.extra_callocation
 end

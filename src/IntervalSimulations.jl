@@ -15,10 +15,11 @@ using Base.Threads
 using ProgressBars
 using IntervalOptimisation
 using Unidecode
+import TaylorModels
+import LaTeXStrings
 
 include("functions.jl")
-export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!
-
+export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!, getBounds, computeSolutionBounds,  plotSolutionBounds!, plotSolutionBounds,  getUnifiedBounds
 include("mtk2ivp.jl")
 export createIVP, createIVP2
 

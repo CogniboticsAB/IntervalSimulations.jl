@@ -1,27 +1,69 @@
 module IntervalSimulations
 
-using ReachabilityAnalysis
-using Symbolics
-using SymbolicUtils
-using ModelingToolkit
-using ModelingToolkit: t_nounits as t
-using IntervalArithmetic
-using FastGaussQuadrature
-using DifferentialEquations
-using Base.Iterators: product
-using Plots
-using Base: product
-using Base.Threads
-using ProgressBars
-using IntervalOptimisation
-using Unidecode
+# Core dependencies
+import ReachabilityAnalysis
+import ReachabilityAnalysis: @ivp
+import Symbolics
+import SymbolicUtils
+import ModelingToolkit
+import IntervalArithmetic
+import FastGaussQuadrature
+import DifferentialEquations
 import TaylorModels
-import LaTeXStrings
+import Plots
+import ProgressBars
+import Base.Threads: @threads
+import Base.Iterators: product
+import Unidecode
+import LazySets
+import ThreadsX
 
-include("functions.jl")
-export solveInterval, intervalPlot, intervalPlot!, solveScanning, plotScanning, plotScanning!, getBounds, computeSolutionBounds,  plotSolutionBounds!, plotSolutionBounds,  getUnifiedBounds
-include("mtk2ivp.jl")
-export createIVP, createIVP2
+# Use short aliases internally (optional)
+const RA  = ReachabilityAnalysis
+const MTK = ModelingToolkit
+const IA  = IntervalArithmetic
+const TM  = TaylorModels
+const plt = Plots
+const DE = DifferentialEquations
 
+# Include internal submodules (no `module` keyword inside files)
+include("Types.jl")
+include("Utils.jl")
+include("PCE.jl")
+include("ReachabilityTools.jl")
+include("ScanningMonteCarlo.jl")
+include("Plotting.jl")
+include("MTKPreparation.jl")  # your former mtk2ivp.jl
+
+# Public API
+export
+    # types
+    SimulationResult,
+
+    # solvers
+    solve_pce,
+    solve_reachability,
+    solve_parameter_scan,
+    solve_monte_carlo,
+    solve_pce_split,
+    solve_reachability_split,
+
+    # postprocessing
+    calculate_bounds_pce,
+    calculate_bounds_split,
+    get_bounds,
+    compute_bounds,
+    calculate_bounds_split_reach,
+
+    # plotting
+    plot_solution,
+    plot_solution!,
+
+    # utils
+    getIntervals,
+    validate_interesting_variables,
+
+    # modeling toolkit support
+    createIVP
 
 end

@@ -15,7 +15,7 @@ end
 
 In-place plot based on simulation type.
 """
-function plot_solution!(plt, result::SimulationResult; idxs=(0,1), varnames=["x", "y"], kwargs...)
+function plot_solution!(plt, result::SimulationResult; label = "", idxs=(0,1), varnames=["x", "y"], kwargs...)
     kind = result.kind[:type]
     vars = result.vars
 
@@ -75,12 +75,14 @@ function plot_solution!(plt, result::SimulationResult; idxs=(0,1), varnames=["x"
     elseif kind == :bounded_reach
         @info "Plotting bounded reach result"
         i1, i2 = idxs
-
+        if label ==""
+            label = "Bounds TM"
+        end
         if i1 == 0
             # Plot over time for a single variable
             if haskey(result.sol, i2)
                 lo, hi = result.sol[i2]
-                Plots.plot!(plt, result.ts, lo; label="Bounds TM", color=:blue, linestyle=:dash, kwargs...)
+                Plots.plot!(plt, result.ts, lo; label=label, color=:blue, linestyle=:dash, kwargs...)
                 Plots.plot!(plt, result.ts, hi; label="", color=:blue, linestyle=:dash, kwargs...)
             else
                 error("Variable index $i2 not found in result.sol")
@@ -90,7 +92,7 @@ function plot_solution!(plt, result::SimulationResult; idxs=(0,1), varnames=["x"
             if haskey(result.sol, i1) && haskey(result.sol, i2)
                 lo1, hi1 = result.sol[i1]
                 lo2, hi2 = result.sol[i2]
-                Plots.plot!(plt, lo1, lo2; label="Bounds TM", color=:blue, linestyle=:dash, kwargs...)
+                Plots.plot!(plt, lo1, lo2; label=label, color=:blue, linestyle=:dash, kwargs...)
                 Plots.plot!(plt, hi1, hi2; label="", color=:blue, linestyle=:dash, kwargs...)
             else
                 error("Variable indices $i1 or $i2 not found in result.sol")

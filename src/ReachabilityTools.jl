@@ -115,7 +115,8 @@ end
 function solve_reachability_split(ivp::RA.InitialValueProblem, vars, tspan;
     dt=0.01,
     solver=RA.TMJets21b(adaptive=false),
-    split_counts=Dict()
+    split_counts=Dict(),
+    threading = true
 )
     if isempty(split_counts)
         return solve_reachability(ivp, vars, tspan; dt=dt, solver=solver)
@@ -134,7 +135,7 @@ function solve_reachability_split(ivp::RA.InitialValueProblem, vars, tspan;
     prob = @ivp(x' = f(x), dim = order, x(0) ∈ X0)
 
     # Use ReachabilityAnalysis' built-in multi-IVP solver
-    sol = RA.solve(prob, tspan=tspan, alg=solver)
+    sol = RA.solve(prob, tspan=tspan, alg=solver, threading=threading)
 
     # Wrap each solution into a SimulationResult to match your structure
     ts = tspan[1]:dt:tspan[2]

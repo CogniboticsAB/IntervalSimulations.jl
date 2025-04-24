@@ -40,10 +40,13 @@ function plot_solution!(plt, result::SimulationResult; label = "", idxs=(0,1), v
     elseif kind == :pce_bounded
         @info "Plotting PCE solution"
         i1, i2 = idxs
+        if label ==""
+            label = "Bounds PCE"
+        end
         if i1 == 0
             sym = vars[i2]
             m, l, u = result.sol[sym]
-            Plots.plot!(plt, result.ts, l; label="Bounds PCE", linestyle=:dash, color=:red, kwargs...)
+            Plots.plot!(plt, result.ts, l; label=label, linestyle=:dash, color=:red, kwargs...)
             Plots.plot!(plt, result.ts, u; label="", linestyle=:dash, color=:red, kwargs...)
         else
             s1, s2 = vars[i1], vars[i2]
@@ -56,11 +59,14 @@ function plot_solution!(plt, result::SimulationResult; label = "", idxs=(0,1), v
         end
     elseif kind == :pce_bounded_split
         @info "Plotting PCE solution"
+        if label ==""
+            label = "Bounds PCE Split"
+        end
         i1, i2 = idxs
         if i1 == 0
             sym = vars[i2]
             m, l, u = result.sol[sym]
-            Plots.plot!(plt, result.ts, l; label="Bounds PCE Split", color=:red, kwargs...)
+            Plots.plot!(plt, result.ts, l; label=label, color=:red, kwargs...)
             Plots.plot!(plt, result.ts, u; label="", color=:red, kwargs...)
         else
             s1, s2 = vars[i1], vars[i2]
@@ -122,15 +128,25 @@ function plot_solution!(plt, result::SimulationResult; label = "", idxs=(0,1), v
                 error("Variable indices $i1 or $i2 not found in result.sol")
             end
         end
-    elseif kind in [:scanning_bounded, :monte_bounded]
+    elseif kind in [:scanning_bounded, :monte_bounded,:merged_bounds]
         if kind == :scanning_bounded
             @info "Plotting scanning bounds"
-            label = "Bounds SM"
+            if label ==""
+                label = "Bounds SM"
+            end
             color = :green
-        else
+        elseif kind == :monte_bounded
             @info "Plotting monte bounds"
-            label = "Bounds MC"
+            if label ==""
+                label = "Bounds MC"
+            end
             color = :purple
+        else
+            @info "Plotting merged bounds"
+            if label ==""
+                label = "Bounds MC+SM"
+            end
+            color = :orange
         end
         
         i1, i2 = isa(idxs, Tuple) ? idxs : (0, idxs)

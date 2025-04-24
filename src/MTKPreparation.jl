@@ -2,9 +2,9 @@
 
 
 function remove_t_and_pluses(substring::AbstractString)
-    no_t = replace(String(substring), r"\(t\)" => "")
+    no_t = Base.replace(String(substring), r"\(t\)" => "")
     pat = r"((?:[0-9Ee.\+\-]+)?)(?:[A-Za-z0-9]+₊){1,}([A-Za-z0-9]+)"
-    result = replace(no_t, pat => (match_sub::AbstractString) -> begin
+    result = Base.replace(no_t, pat => (match_sub::AbstractString) -> begin
         mm = match(pat, match_sub)
         mm === nothing && return match_sub
         return mm.captures[1] * mm.captures[2]
@@ -75,12 +75,12 @@ function clean_equation_rhs(rhs_str::AbstractString)
     out = remove_t_and_pluses(rhs_str)
 
     # 1) Insert `*` after a digit if next char is '('
-    out = replace(out, r"(?<=[0-9])(?=\()" => "*")
+    out = Base.replace(out, r"(?<=[0-9])(?=\()" => "*")
 
     # 2) Insert `*` after a digit if next char is letterlike
     #    (including Greek letters).  We use `(?<=[0-9])(?=[^\W\d_])`
     #    so that it excludes punctuation, digits, underscores, etc.
-    out = replace(out, r"(?<=[0-9])(?=[^\W\d_])" => "*")
+    out = Base.replace(out, r"(?<=[0-9])(?=[^\W\d_])" => "*")
 
     # 3) Convert any remaining Unicode to ASCII approximations
     out = Unidecode.unidecode(out)
@@ -96,7 +96,7 @@ resolves initial values (including intervals), extracts algebraic equations if n
 and returns a reachability-ready IVP.
 """
 function createIVP(sys; vpa_digits = 10, print_matlab = false)
-    fol = ModelingToolkit.structural_simplify(sys)
+    fol = ModelingToolkit.structural_simplify(sys, simplify =true)
 
     e = ModelingToolkit.full_equations(fol)
     d1 = ModelingToolkit.defaults(fol)

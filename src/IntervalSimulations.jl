@@ -17,6 +17,12 @@ import Base.Iterators: product
 import Unidecode
 import LazySets
 import ThreadsX
+import SymbolicIndexingInterface: parameter_values, state_values
+import SciMLStructures: Tunable, canonicalize, replace, replace!
+import Distributions
+
+import IntervalArithmetic: ±, inf, sup, Interval
+export ±, inf, sup, Interval
 
 # Use short aliases internally (optional)
 const RA  = ReachabilityAnalysis
@@ -64,6 +70,13 @@ export
     validate_interesting_variables,
 
     # modeling toolkit support
-    createIVP
+    createIVP,
+
+    poly_coeff_l2norms,
+    evaluate_bounds_over_time,
+    print_sorted_coeffs,
+    merge_bounds,
+    coeff_energy_by_order
 
 end
+

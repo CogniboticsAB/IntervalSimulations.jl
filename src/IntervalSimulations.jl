@@ -16,7 +16,6 @@ import Base.Threads: @threads
 import Base.Iterators: product
 import Unidecode
 import LazySets
-import ThreadsX
 import SymbolicIndexingInterface: parameter_values, state_values
 import SciMLStructures: Tunable, canonicalize, replace, replace!
 import Distributions

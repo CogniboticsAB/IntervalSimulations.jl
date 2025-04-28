@@ -34,16 +34,22 @@ end
 
 Randomly samples parameters from intervals. Returns a `SimulationResult` with `:type => :monte`.
 """
-function solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, interesting_vars=[])
+function solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, interesting_vars=[], verbose = true)
     param_ranges = getIntervals(sys, var_dict)
     ts = tspan[1]:dt:tspan[2]
     all_states = [MTK.unknowns(sys)..., interesting_vars...]  # Changed to vector
 
     sols = Vector{MTK.ODESolution}(undef, num_samples)
     keys_ = collect(keys(param_ranges))
-    prob = MTK.ODEProblem(sys, [], tspan, [])
+    prob = MTK.ODEProblem(sys, [], tspan, [], warn_initialize_determined = verbose)
     #Should be possible to multithread but cant have shared sys I think
-    for i in ProgressBars.ProgressBar(1:num_samples)
+    if verbose
+        iter = ProgressBars.ProgressBar(1:num_samples)
+    else
+        iter = 1:num_samples
+    end
+    
+    for i in iter
         sampled = Dict(k => rand(Distributions.Uniform(IA.inf(v),IA.sup(v))) for (k, v) in param_ranges)
         prob = MTK.ODEProblem(sys, nothing, tspan, sampled, warn_initialize_determined = false)
         sols[i] = DifferentialEquations.solve(prob, saveat=ts)

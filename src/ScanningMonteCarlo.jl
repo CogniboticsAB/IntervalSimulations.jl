@@ -13,12 +13,27 @@ function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, i
     all_states = [MTK.unknowns(sys)..., interesting_vars...]  # Changed to vector
 
     param_keys = collect(keys(param_ranges))
-    prob = MTK.ODEProblem(sys, [], tspan, [])
+    prob2 = MTK.ODEProblem(sys, [], tspan, [])
     sols = Vector{MTK.ODESolution}(undef, length(grid))
-    for (i, combo) in ProgressBars.ProgressBar(enumerate(grid))
+    lc = ReentrantLock()
+    n = length(grid)
+
+    #println("Running scan over $n points using $(Threads.nthreads()) threads...")
+    
+    Threads.@threads for i in ProgressBars.ProgressBar(1:n)
+        combo = grid[i]
+        lock(lc)
+        local_sys = deepcopy(sys)
+        unlock(lc)
         p = Dict(param_keys[j] => combo[j] for j in 1:length(combo))
-        prob = MTK.ODEProblem(sys, nothing, tspan, p, warn_initialize_determined = false)
-        sols[i] = DifferentialEquations.solve(prob, saveat=ts)
+    
+        prob = MTK.ODEProblem(local_sys, nothing, tspan, p, warn_initialize_determined = false)
+    
+        sol = DifferentialEquations.solve(prob, DifferentialEquations.Rodas5(), saveat=ts)
+        lock(lc)
+        sols[i] = sol
+        unlock(lc)
+
     end
 
     return SimulationResult(
@@ -48,18 +63,26 @@ function solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, in
     else
         iter = 1:num_samples
     end
-    
-    for i in iter
+    lc = ReentrantLock()
+    samples = Vector{Any}(undef, num_samples)
+    @threads for i in iter
         sampled = Dict(k => rand(Distributions.Uniform(IA.inf(v),IA.sup(v))) for (k, v) in param_ranges)
-        prob = MTK.ODEProblem(sys, nothing, tspan, sampled, warn_initialize_determined = false)
-        sols[i] = DifferentialEquations.solve(prob, saveat=ts)
+        lock(lc)
+        syss = deepcopy(sys)
+        unlock(lc)
+        prob = MTK.ODEProblem(syss, nothing, tspan, sampled, warn_initialize_determined = false)
+        sol = DifferentialEquations.solve(prob, DifferentialEquations.Rodas5(), saveat=ts)
+        lock(lc)
+        sols[i] = sol
+        samples[i] = sampled
+        unlock(lc)
     end
 
     return SimulationResult(
         sols,
         all_states,  # Corrected here
         ts,
-        Dict(:type => :monte, :num_samples => num_samples, :problem => sys)
+        Dict(:type => :monte, :num_samples => num_samples, :problem => sys, :samples => samples)
     )
 end
 

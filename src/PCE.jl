@@ -51,6 +51,19 @@ function generate_quadrature_weights(d::Int, poly_order::Int)
     return [prod(w) for w in weights_product]
 end
 
+function legendre_polynomials(ξ, max_order)
+    p = Vector{Float64}(undef, max_order + 1)
+    p[1] = 1.0
+    if max_order ≥ 1
+        p[2] = ξ
+    end
+    for n in 2:max_order
+        p[n+1] = ((2n - 1) * ξ * p[n] - (n - 1) * p[n-1]) / n
+    end
+    return p
+end
+
+
 # -------------------------------------------
 # Main PCE routine
 # -------------------------------------------
@@ -152,7 +165,8 @@ function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
     )
 end
 
-function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficients=false, ia =true, use_heuristic=false, order_thresh = 3, threshold = 0.04, pts_per_dim= 20)
+
+function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficients=false, ia =true, use_heuristic=false)
     sys = result.kind[:problem]
     data = result.sol
     d = data.d
@@ -208,38 +222,54 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
     # Extra container for all coefficient dictionaries
     coeffs_for_all = Dict{Any, Dict{NTuple{d,Int}, Vector{Float64}}}()
     pbar = ProgressBars.ProgressBar(total=length(selected_vars)*num_times)
+    println("here")
     for unk in selected_vars
         coeff_dict = Dict(mi => zeros(num_times) for mi in multi_indices)
         mean_vals  = zeros(num_times)
         lower_vals = zeros(num_times)
         upper_vals = zeros(num_times)
-
-        for t_idx in 1:num_times
-            y_vals = [solutions[k][unk][t_idx] for k in 1:N_nodes]
+        #locy_vals = [solutions[k][unk] for k in 1:N_nodes]
+        locy_vals = Vector{Vector{Float64}}(undef, N_nodes)
+        @threads for k in ProgressBars.ProgressBar(1:N_nodes)
+            val = solutions[k][unk]  # Expensive call, especially for observables
+            locy_vals[k] = val
+            
+        end
+        println("here2")
+        @threads for t_idx in 1:num_times
+            #println("here3")
+            y_vals = [locy_vals[k][t_idx] for k in 1:N_nodes]
+            #y_vals = [solutions[k][unk][t_idx] for k in 1:N_nodes]
             enclosure = IA.interval(0.0)
 
-            @threads for m_idx in 1:M
+            for m_idx in 1:M
                 sum_val = sum(weights[k] * y_vals[k] * phi_table[k,m_idx] for k in 1:N_nodes)
                 coeff_dict[multi_indices[m_idx]][t_idx] = norm_factors[m_idx] * sum_val
             end
 
             if !ia
-                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=pts_per_dim)
+                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=20)
                 lower_vals[t_idx] = minimum(yvals)
                 upper_vals[t_idx] = maximum(yvals)
-            elseif use_heuristic && should_use_grid(coeff_dict, t_idx, order_thresh = order_thresh, threshold = threshold)
-                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=pts_per_dim)
+            elseif use_heuristic && should_use_grid(coeff_dict, t_idx)
+                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=20)
                 lower_vals[t_idx] = minimum(yvals)
                 upper_vals[t_idx] = maximum(yvals)
+                
             else
                 for m_idx in 1:M
                     enclosure += coeff_dict[multi_indices[m_idx]][t_idx] * poly_interval[m_idx]
                 end
 
+
                 lower_vals[t_idx] = IA.inf(enclosure)
                 upper_vals[t_idx] = IA.sup(enclosure)
+
             end
+       
             mean_vals[t_idx]  = coeff_dict[zero_multi_idx][t_idx]
+          
+            #println("here3")
             ProgressBars.update(pbar)
         end
 
@@ -256,8 +286,6 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
 
     return coefficients ? (sim_result, coeffs_for_all) : sim_result
 end
-
-
 
 function split_intervals(prob, var_splits::Dict)
     # Start with one base interval set
@@ -318,7 +346,8 @@ function solve_pce_split(prob, tspan;
 
     sim_results = SimulationResult[]
     first_split = true
-    for new_var_dict in split_var_dicts
+    lc = ReentrantLock()
+    @threads for new_var_dict in split_var_dicts
         # Add any overrides from user-specified var_dict (but keep split intervals)
         for (k, v) in var_dict
             new_var_dict[k] = v
@@ -328,7 +357,10 @@ function solve_pce_split(prob, tspan;
         #new_var_dict = Dict(k => to_IA_interval(v) for (k, v) in new_var_dict)
 
         # Run the simulation for this subinterval configuration
-        sim_res = solve_pce(prob, tspan;
+        lock(lc)
+        prob1 = deepcopy(prob)
+        unlock(lc)
+        sim_res = solve_pce(prob1, tspan;
                             var_dict=new_var_dict,
                             dt=dt,
                             poly_order=poly_order,
@@ -337,7 +369,9 @@ function solve_pce_split(prob, tspan;
                             extra_callocation=extra_callocation,
                             verbose=verbose,
                             first_split = first_split)
+        lock(lc)
         push!(sim_results, sim_res)
+        unlock(lc)
         first_split = false
     end
 
@@ -365,7 +399,17 @@ final_bounds = Dict()
 # Retrieve the vector of simulation results.
 sim_results = split_res.sol
 # Compute bounds for each split-case simulation.
-bounds_list = [calculate_bounds_pce(r,idxs=idxs, ia = ia, use_heuristic=use_heuristic) for r in sim_results]
+bounds_list = Vector{Any}(undef, length(sim_results))
+lc = ReentrantLock()
+Threads.@threads for i in eachindex(sim_results)
+    lock(lc)
+    sol = sim_results[i]
+    unlock(lc)
+    bsol =  calculate_bounds_pce(sol, idxs=idxs, ia=ia, use_heuristic=use_heuristic)
+    lock(lc)
+    bounds_list[i] = bsol
+    unlock(lc)
+end
 
 idxlist =
 isnothing(idxs) ? common_vars :
@@ -376,7 +420,7 @@ isa(idxs, AbstractVector) ? idxs :
 selected_vars = [i isa Int ? common_vars[i] : i for i in idxlist]
 
 # For each variable, combine the lower and upper bounds time point–by–time point.
-for v in selected_vars
+@threads for v in selected_vars
     lowers = [b.sol[v][2] for b in bounds_list]
     uppers = [b.sol[v][3] for b in bounds_list]
     num_times = length(common_ts)
@@ -435,10 +479,13 @@ function evaluate_pce_on_grid_custom(coeffdict, t_index; pts_per_dim=20)
     ξgrid = collect(product(ntuple(_ -> ξrange, D)...))
 
     yvals = Float64[]
+    #lc =ReentrantLock()
     for ξ in ξgrid
         ξtup = Tuple(ξ)
         y = sum(coeffdict[mi][t_index] * multivariate_legendre_custom(mi, ξtup) for mi in keys(coeffdict))
+        #lock(lc)
         push!(yvals, y)
+        #unlock(lc)
     end
 
     return yvals, ξgrid
@@ -477,7 +524,7 @@ function print_sorted_coeffs(coeffdict, t_index; top_n=length(coeffdict))
 end
 
 
-function should_use_grid(coeffdict, t_index; order_thresh=3, threshold=0.04)
+function should_use_grid(coeffdict, t_index; order_thresh=2, threshold=0.1)
     total = 0.0
     for (mi, coeffs) in coeffdict
         if sum(mi) ≥ order_thresh

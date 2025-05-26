@@ -8,9 +8,12 @@ function getIntervals(sys, pval::Dict)
     d = ModelingToolkit.defaults(sys)
     new_u = Dict(kv for kv in d if kv.second isa IntervalArithmetic.Interval)
     converted_new_u = Dict(Symbolics.Num(k) => v for (k, v) in new_u)
+    #println(converted_new_u)
     intervals = merge(converted_new_u, pval)
-    final_intervals = Dict(Symbolics.Num(k) => v for (k, v) in intervals)
-    return final_intervals
+    intervals2 = Dict(Symbolics.Num(k) => v for (k, v) in intervals)
+    final_intervals = Dict(Symbolics.Num(k) => v for (k, v) in intervals if v isa IntervalArithmetic.Interval)
+    not_intervals = Dict(k => v for (k, v) in intervals if !(v isa IntervalArithmetic.Interval))
+    return final_intervals, not_intervals, intervals2
 end
 
 """

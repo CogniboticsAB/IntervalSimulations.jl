@@ -1,5 +1,9 @@
 module IntervalSimulations
 
+
+import OrdinaryDiffEq
+const DE = OrdinaryDiffEq
+
 # Core dependencies
 import ReachabilityAnalysis
 import ReachabilityAnalysis: @ivp
@@ -8,7 +12,6 @@ import SymbolicUtils
 import ModelingToolkit
 import IntervalArithmetic
 import FastGaussQuadrature
-import DifferentialEquations
 import TaylorModels
 import Plots
 import ProgressBars
@@ -29,7 +32,6 @@ const MTK = ModelingToolkit
 const IA  = IntervalArithmetic
 const TM  = TaylorModels
 const plt = Plots
-const DE = DifferentialEquations
 
 # Include internal submodules (no `module` keyword inside files)
 include("Types.jl")
@@ -75,7 +77,8 @@ export
     evaluate_bounds_over_time,
     print_sorted_coeffs,
     merge_bounds,
-    coeff_energy_by_order
+    coeff_energy_by_order,
+    split_intervals
 
 end
 

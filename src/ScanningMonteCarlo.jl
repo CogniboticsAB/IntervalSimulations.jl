@@ -29,11 +29,11 @@ function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, i
     
         prob = MTK.ODEProblem(local_sys, nothing, tspan, p, warn_initialize_determined = false)
     
-        sol = DifferentialEquations.solve(prob, DifferentialEquations.Rodas5(), saveat=ts)
+        sol = DE.solve(prob, DE.Rodas5(), saveat=ts)
         lock(lc)
         sols[i] = sol
         unlock(lc)
-
+        GC.gc()
     end
 
     return SimulationResult(
@@ -44,20 +44,21 @@ function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, i
     )
 end
 
-"""
-    solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, interesting_vars=[])
 
-Randomly samples parameters from intervals. Returns a `SimulationResult` with `:type => :monte`.
-"""
-function solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, interesting_vars=[], verbose = true)
-    param_ranges = getIntervals(sys, var_dict)
+
+function solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, 
+                            interesting_vars=[],
+                            solver=DE.Rodas5(), 
+                            verbose = true,
+                            suppress_warn=true)
+    interval_params, non_intervals, _ = getIntervals(sys, var_dict)
     ts = tspan[1]:dt:tspan[2]
-    all_states = [MTK.unknowns(sys)..., interesting_vars...]  # Changed to vector
+    all_states = [MTK.unknowns(sys)..., interesting_vars...]
 
+    param_keys = collect(keys(interval_params))
+    dist_ranges = [Distributions.Uniform(IA.inf(v), IA.sup(v)) for v in values(interval_params)]
+    kwargs = suppress_warn ? (; warn_initialize_determined=false) : NamedTuple()
     sols = Vector{MTK.ODESolution}(undef, num_samples)
-    keys_ = collect(keys(param_ranges))
-    prob = MTK.ODEProblem(sys, [], tspan, [], warn_initialize_determined = verbose)
-    #Should be possible to multithread but cant have shared sys I think
     if verbose
         iter = ProgressBars.ProgressBar(1:num_samples)
     else
@@ -65,20 +66,23 @@ function solve_monte_carlo(sys, tspan, num_samples; var_dict=Dict(), dt=0.01, in
     end
     lc = ReentrantLock()
     samples = Vector{Any}(undef, num_samples)
-    @threads for i in iter
-        sampled = Dict(k => rand(Distributions.Uniform(IA.inf(v),IA.sup(v))) for (k, v) in param_ranges)
+    Threads.@threads for i in iter
+        sampled_vals = ntuple(j -> rand(dist_ranges[j]), length(dist_ranges))
+        param_sample = Dict(param_keys[j] => sampled_vals[j] for j in eachindex(param_keys))
+        full_param = merge(param_sample, non_intervals)
         lock(lc)
         syss = deepcopy(sys)
         unlock(lc)
-        prob = MTK.ODEProblem(syss, nothing, tspan, sampled, warn_initialize_determined = false)
-        sol = DifferentialEquations.solve(prob, DifferentialEquations.Rodas5(), saveat=ts)
-        lock(lc)
+        prob = MTK.ODEProblem(syss, nothing, tspan, full_param; kwargs...)
+        sol = DE.solve(prob, solver,saveat=ts)
+        
+        #lock(lc)
         sols[i] = sol
-        samples[i] = sampled
-        unlock(lc)
+        samples[i] = param_sample
+        #unlock(lc)
     end
 
-    return SimulationResult(
+        return SimulationResult(
         sols,
         all_states,  # Corrected here
         ts,
@@ -101,12 +105,13 @@ Returns:
 - `.vars` lists the included variables
 - `.kind[:idxs]` remembers which were requested
 """
-function compute_bounds(result::SimulationResult; idxs=1)
+function compute_bounds(result::SimulationResult; idxs=1, verbose = true)
     sols = result.sol
     all_vars = result.vars
     times = result.ts
     kind = result.kind[:type]
     n = length(times)
+    num_samples = length(sols)
 
     # Normalize inputs
     idxlist =
@@ -116,7 +121,10 @@ function compute_bounds(result::SimulationResult; idxs=1)
 
     selected_vars = Vector{Any}(undef, length(idxlist))
     bounds = Dict{Symbol, Vector{Float64}}()
-
+    if verbose
+        pbar = ProgressBars.ProgressBar(total=length(idxlist)*num_samples)
+    end
+    lc = ReentrantLock()
     for (i, idx) in enumerate(idxlist)
         var = idx isa Int ? all_vars[idx] : idx
         selected_vars[i] = var
@@ -124,8 +132,25 @@ function compute_bounds(result::SimulationResult; idxs=1)
         minv = fill(Inf, n)
         maxv = fill(-Inf, n)
 
+        
+        locsol = Vector{Vector{Float64}}(undef, num_samples)
+        Threads.@threads for k in 1:num_samples
+            #lock(lc)
+            #sol1=deepcopy(sols[k])
+            #unlock(lc)
+            #locsol[k] = sol1[var]
+            locsol[k] = sols[k][var]
+            if verbose 
+                lock(lc)
+                ProgressBars.update(pbar)
+                unlock(lc)
+            end
+            #k%100==0 && GC.gc()
+        end
+        #println(typeof(sols))
         for t in 1:n
-            vals = [sol[var][t] for sol in sols]
+            #println("here")
+            vals = [sol[t] for sol in locsol]
             minv[t] = minimum(vals)
             maxv[t] = maximum(vals)
         end
@@ -133,7 +158,7 @@ function compute_bounds(result::SimulationResult; idxs=1)
         bounds[Symbol("min$i")] = minv
         bounds[Symbol("max$i")] = maxv
     end
-
+    GC.gc()
     return SimulationResult(
         bounds,
         selected_vars,  # Corrected here

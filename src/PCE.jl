@@ -90,12 +90,13 @@ Returns:
 - `SimulationResult` with `:type => :pce`.
 """
 function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
-                       pce_solver=Rodas5(), interesting_variables=[],
-                       extra_callocation=0, verbose=false, first_split=true)
+                       pce_solver=DE.Rodas5(), interesting_variables=[],
+                       extra_callocation=0, verbose=true, first_split=true)
 
     # Step 1: Extract intervals
-    param_intervals = getIntervals(prob, var_dict)
-
+    param_intervals, non_intervals, pp = getIntervals(prob, var_dict)
+    #println(param_intervals)
+    #println(pp)
     # Step 2: Generate collocation points
     d = length(param_intervals)
     nodes, xi_nodes = generate_collocation_nodes(param_intervals, poly_order + extra_callocation)
@@ -113,7 +114,7 @@ function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
     for u in keys(ic_dict)
         delete!(p_dict, u)
     end
-
+    p_dict=merge(p_dict,non_intervals)
     odeprob = MTK.ODEProblem(prob, ic_dict, tspan, p_dict)
     setp! = ModelingToolkit.setp(odeprob, [keys(p_dict)...])
     setu! = ModelingToolkit.setu(odeprob, [keys(ic_dict)...])
@@ -121,24 +122,33 @@ function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
     
     # Step 4: Solve the system at each node
     solutions = Vector{MTK.ODESolution}(undef, N)
-    for i in ProgressBars.ProgressBar(1:N)
+    l = ReentrantLock()
+    if verbose
+        iter = ProgressBars.ProgressBar(1:N)
+    else 
+        iter=1:N
+    end
+    @threads for i in iter
         p_dict = copy(nodes[i])
         ic_dict = Dict(u => p_dict[u] for u in state_vars if haskey(p_dict, u))
         for u in keys(ic_dict)
             delete!(p_dict, u)
         end
-        odeprob = MTK.ODEProblem(prob, ic_dict, tspan, p_dict, warn_initialize_determined = false)
-        solutions[i] = DifferentialEquations.solve(odeprob, pce_solver, saveat=save_times)
+        p_dict=merge(p_dict,non_intervals)
+        odeprob = MTK.ODEProblem(prob, ic_dict, tspan, p_dict)
+        s = DE.solve(odeprob, pce_solver, saveat=save_times)
+        solutions[i] = s
+
     end
     
-
+    
     # Step 5: Sanity check
     for (i, sol) in enumerate(solutions)
         if sol.retcode != :Success
             error("Solver failed at node $i with retcode $(sol.retcode)")
         end
     end
-
+    
     # Step 6: Return SimulationResult
     return SimulationResult(
         (
@@ -166,7 +176,7 @@ function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
 end
 
 
-function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficients=false, ia =true, use_heuristic=false)
+function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficients=false, ia =true, use_heuristic=false, verbose = true)
     sys = result.kind[:problem]
     data = result.sol
     d = data.d
@@ -178,7 +188,7 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
 
     all_vars = result.vars isa Tuple ? collect(result.vars) : result.vars
     num_times = length(save_times)
-
+    lc = ReentrantLock()
     # Handle variable selection
     idxlist = isnothing(idxs) ? all_vars :
               isa(idxs, Tuple) ? collect(idxs) :
@@ -221,8 +231,10 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
     results = Dict{Any, Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}}}()
     # Extra container for all coefficient dictionaries
     coeffs_for_all = Dict{Any, Dict{NTuple{d,Int}, Vector{Float64}}}()
-    pbar = ProgressBars.ProgressBar(total=length(selected_vars)*num_times)
-    println("here")
+    if verbose
+        pbar = ProgressBars.ProgressBar(total=length(selected_vars)*num_times)
+    end
+    #println("here")
     for unk in selected_vars
         coeff_dict = Dict(mi => zeros(num_times) for mi in multi_indices)
         mean_vals  = zeros(num_times)
@@ -230,13 +242,27 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
         upper_vals = zeros(num_times)
         #locy_vals = [solutions[k][unk] for k in 1:N_nodes]
         locy_vals = Vector{Vector{Float64}}(undef, N_nodes)
-        @threads for k in ProgressBars.ProgressBar(1:N_nodes)
-            val = solutions[k][unk]  # Expensive call, especially for observables
-            locy_vals[k] = val
-            
+        if verbose 
+            println("")
+            println("Extracting necessary values, could take time if selected variables are observables")
+            println("")
+            Threads.@threads for k in ProgressBars.ProgressBar(1:N_nodes)
+                #lock(lc)
+                #sol = deepcopy(solutions[k])
+                #unlock(lc)
+                locy_vals[k] = solutions[k][unk]  # Expensive call, especially for observables
+                #println(typeof(locy_vals[k]))
+            end
+        else
+            Threads.@threads for k in 1:N_nodes
+                #lock(lc)
+                #sol = deepcopy(solutions[k])
+                #unlock(lc)
+                locy_vals[k] = solutions[k][unk]  # Expensive call, especially for observables
+            end
         end
-        println("here2")
-        @threads for t_idx in 1:num_times
+        #println("here2")
+        Threads.@threads for t_idx in 1:num_times
             #println("here3")
             y_vals = [locy_vals[k][t_idx] for k in 1:N_nodes]
             #y_vals = [solutions[k][unk][t_idx] for k in 1:N_nodes]
@@ -244,7 +270,7 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
 
             for m_idx in 1:M
                 sum_val = sum(weights[k] * y_vals[k] * phi_table[k,m_idx] for k in 1:N_nodes)
-                coeff_dict[multi_indices[m_idx]][t_idx] = norm_factors[m_idx] * sum_val
+                coeff_dict[multi_indices[m_idx]][t_idx] = norm_factors[m_idx] * sum_val        
             end
 
             if !ia
@@ -270,7 +296,12 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
             mean_vals[t_idx]  = coeff_dict[zero_multi_idx][t_idx]
           
             #println("here3")
-            ProgressBars.update(pbar)
+            if verbose
+                lock(lc)
+                ProgressBars.update(pbar)
+                unlock(lc)
+            end
+            
         end
 
         results[unk] = (mean_vals, lower_vals, upper_vals)
@@ -283,14 +314,13 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
         save_times,
         merge(result.kind, Dict(:type => :pce_bounded, :idxs => idxlist))
     )
-
+    
     return coefficients ? (sim_result, coeffs_for_all) : sim_result
 end
-
-function split_intervals(prob, var_splits::Dict)
+function split_intervals(prob, var_splits::Dict, var_dict)
     # Start with one base interval set
-    base = getIntervals(prob, Dict())
-    inters = [copy(base)]
+    param_intervals, non_intervals, pp= getIntervals(prob, var_dict)
+    inters = [copy(param_intervals)]
 
     for var in keys(var_splits)
         n = var_splits[var]
@@ -298,12 +328,12 @@ function split_intervals(prob, var_splits::Dict)
 
         for d in inters
             iv = d[var]
-            lb = ReachabilityAnalysis.inf(iv)
-            ub = ReachabilityAnalysis.sup(iv)
+            lb = IntervalArithmetic.inf(iv)
+            ub = IntervalArithmetic.sup(iv)
             Δ = (ub - lb) / n
 
             for i in 0:(n-1)
-                d_new = copy(d)
+                d_new = Dict{MTK.Num, Any}(d)  # allows both Intervals and Float64s
                 d_new[var] = IA.Interval((lb + i*Δ),(lb + (i+1)*Δ))
                 push!(new_inters, d_new)
             end
@@ -312,7 +342,7 @@ function split_intervals(prob, var_splits::Dict)
         inters = new_inters
     end
 
-    return inters
+    return inters, non_intervals
 end
 
 
@@ -323,10 +353,10 @@ function solve_pce_split(prob, tspan;
     var_dict=Dict(),
     dt=0.01,
     poly_order=2,
-    pce_solver=Rodas5(),
+    pce_solver=DE.Rodas5(),
     interesting_variables=[],
     extra_callocation=0,
-    verbose=false,
+    verbose=true,
     split_counts=Dict())  # e.g. Dict(:l1 => 2)
 
     # If no splitting, just delegate to solve_pce directly
@@ -338,47 +368,52 @@ function solve_pce_split(prob, tspan;
                          pce_solver=pce_solver,
                          interesting_variables=interesting_variables,
                          extra_callocation=extra_callocation,
-                         verbose=verbose)
+                         verbose=false)
     end
-
+    
     # Get split interval dicts using your utility
-    split_var_dicts = split_intervals(prob, split_counts)
-
+    split_var_dicts, non_intervals = split_intervals(prob, split_counts, var_dict)
+    
     sim_results = SimulationResult[]
     first_split = true
     lc = ReentrantLock()
-    @threads for new_var_dict in split_var_dicts
+    if verbose 
+        iter = ProgressBars.ProgressBar(split_var_dicts)
+    else
+        iter = split_var_dicts
+    end
+    for new_var_dict in iter
         # Add any overrides from user-specified var_dict (but keep split intervals)
-        for (k, v) in var_dict
-            new_var_dict[k] = v
-        end
+        #println("new_var_dict",new_var_dict)
+        new_var_dict = merge!(new_var_dict, non_intervals)
+        #println(new_var_dict)
+
         
         # Convert any LazySets or odd intervals
         #new_var_dict = Dict(k => to_IA_interval(v) for (k, v) in new_var_dict)
-
+        #println("newvardict",new_var_dict)
         # Run the simulation for this subinterval configuration
-        lock(lc)
-        prob1 = deepcopy(prob)
-        unlock(lc)
-        sim_res = solve_pce(prob1, tspan;
+        sim_res = solve_pce(prob, tspan;
                             var_dict=new_var_dict,
                             dt=dt,
                             poly_order=poly_order,
                             pce_solver=pce_solver,
                             interesting_variables=interesting_variables,
                             extra_callocation=extra_callocation,
-                            verbose=verbose,
-                            first_split = first_split)
+                            verbose=false,
+                            first_split = first_split
+                            )
         lock(lc)
         push!(sim_results, sim_res)
         unlock(lc)
         first_split = false
+        #GC.gc()
     end
 
     # Assume common ts/vars
     common_ts = sim_results[1].ts
     common_vars = sim_results[1].vars
-
+    
     return SimulationResult(sim_results, common_vars, common_ts,
                             Dict(:type => :split_pce, :split_counts => split_counts))
 end
@@ -400,15 +435,17 @@ final_bounds = Dict()
 sim_results = split_res.sol
 # Compute bounds for each split-case simulation.
 bounds_list = Vector{Any}(undef, length(sim_results))
-lc = ReentrantLock()
-Threads.@threads for i in eachindex(sim_results)
-    lock(lc)
-    sol = sim_results[i]
-    unlock(lc)
-    bsol =  calculate_bounds_pce(sol, idxs=idxs, ia=ia, use_heuristic=use_heuristic)
-    lock(lc)
-    bounds_list[i] = bsol
-    unlock(lc)
+#lc = ReentrantLock()
+#pbar = ProgressBars.ProgressBar(total=length(sim_results))
+for i in ProgressBars.ProgressBar(1:length(sim_results))#eachindex(sim_results)
+    #lock(lc)
+    #sol = sim_results[i]
+    #unlock(lc)
+    bounds_list[i] = calculate_bounds_pce(sim_results[i], idxs=idxs, ia=ia, use_heuristic=use_heuristic, verbose=false)
+    #lock(lc)
+    #ProgressBars.update(pbar)
+    #unlock(lc)
+    #GC.gc()
 end
 
 idxlist =

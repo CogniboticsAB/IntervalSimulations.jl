@@ -1,6 +1,11 @@
 # MTKPreparation.jl
 
+"""
+remove_t_and_pluses(substring::AbstractString)
 
+Removes (t) from variables names and attempts to delete chained subscript-style variables like `x₊y₊z` with only the final symbol (`z`)
+Called by print_matlab_simplify_batch.
+"""
 function remove_t_and_pluses(substring::AbstractString)
     no_t = Base.replace(String(substring), r"\(t\)" => "")
     pat = r"((?:[0-9Ee.\+\-]+)?)(?:[A-Za-z0-9]+₊){1,}([A-Za-z0-9]+)"
@@ -71,6 +76,10 @@ function print_matlab_simplify_batch(eqs_n::Vector{MTK.Equation}, all_vars,
     println("# ------ End of MATLAB snippet ------\n")
 end
 
+"""
+    clean_equation_rhs(rhs_str::AbstractString)
+    Attempts to clean up the symbolic expressions from MTK. Adding multiplication signs where needed and converts unicode characters using the Unidecode package.
+"""
 function clean_equation_rhs(rhs_str::AbstractString)
     out = remove_t_and_pluses(rhs_str)
 

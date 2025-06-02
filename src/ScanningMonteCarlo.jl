@@ -4,8 +4,8 @@
 Grid-scans parameter space and simulates all combinations.
 Returns a `SimulationResult` with `:type => :scanning`.
 """
-function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, interesting_vars=[])
-    param_ranges = getIntervals(sys, var_dict)
+function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, interesting_vars=[], solver = DE.Rodas5())
+    param_ranges, not_intervals, intervals2 = getIntervals(sys, var_dict)
     ts = tspan[1]:dt:tspan[2]
 
     ranges_array = [range(IA.inf(v), IA.sup(v), length=grid_size) for v in values(param_ranges)]
@@ -29,7 +29,7 @@ function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, i
     
         prob = MTK.ODEProblem(local_sys, nothing, tspan, p, warn_initialize_determined = false)
     
-        sol = DE.solve(prob, DE.Rodas5(), saveat=ts)
+        sol = DE.solve(prob, solver, saveat=ts)
         lock(lc)
         sols[i] = sol
         unlock(lc)

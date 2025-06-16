@@ -17,7 +17,7 @@ The package is designed to support symbolic models with interval-valued inputs, 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/yourusername/IntervalSimulations.jl")
+Pkg.add(url="https://github.com/CogniboticsAB/IntervalSimulations.jl")
 ```
 
 ---
@@ -101,6 +101,7 @@ plot!(ylabel="x", xlabel="Time")
 ```
 
 The resulting plot compares all methods in a unified view. Scanning and Monte Carlo provide empirical bounds, PCE gives a fast and smooth approximation, and Taylor models give rigorous enclosures with mathematical guarantees. In this example, the bounds from Monte Carlo, Scanning, and PCE lie nearly on top of each other, and are visually indistinguishable in the plot.
+
 ![Comparison of Methods](fig/plot.svg)
 
 

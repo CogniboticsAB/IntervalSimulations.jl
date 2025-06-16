@@ -18,6 +18,18 @@ function legendre_polynomials(ξ)
     ]
 end
 
+function legendre_polynomialss(ξ, max_order)
+    p = Vector{Float64}(undef, max_order + 1)
+    p[1] = 1.0
+    if max_order ≥ 1
+        p[2] = ξ
+    end
+    for n in 2:max_order
+        p[n+1] = ((2n - 1) * ξ * p[n] - (n - 1) * p[n-1]) / n
+    end
+    return p
+end
+
 function generate_total_degree_multi_indices(d, p)
     return [i for i in Iterators.product((0:p for _ in 1:d)...) if sum(i) <= p]
 end
@@ -51,17 +63,6 @@ function generate_quadrature_weights(d::Int, poly_order::Int)
     return [prod(w) for w in weights_product]
 end
 
-function legendre_polynomials(ξ, max_order)
-    p = Vector{Float64}(undef, max_order + 1)
-    p[1] = 1.0
-    if max_order ≥ 1
-        p[2] = ξ
-    end
-    for n in 2:max_order
-        p[n+1] = ((2n - 1) * ξ * p[n] - (n - 1) * p[n-1]) / n
-    end
-    return p
-end
 
 
 # -------------------------------------------
@@ -129,16 +130,19 @@ function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
         iter=1:N
     end
     @threads for i in iter
-        p_dict = copy(nodes[i])
+        lock(l)
+        probc = deepcopy(prob)
+        p_dict = deepcopy(nodes[i])
+        unlock(l)
         ic_dict = Dict(u => p_dict[u] for u in state_vars if haskey(p_dict, u))
         for u in keys(ic_dict)
             delete!(p_dict, u)
         end
         p_dict=merge(p_dict,non_intervals)
-        odeprob = MTK.ODEProblem(prob, ic_dict, tspan, p_dict)
+        #println(ic_dict)
+        odeprob = MTK.ODEProblem(probc, ic_dict, tspan, p_dict)
         s = DE.solve(odeprob, pce_solver, saveat=save_times)
         solutions[i] = s
-
     end
     
     
@@ -176,7 +180,7 @@ function solve_pce(prob, tspan; var_dict=Dict(), dt=0.01, poly_order=2,
 end
 
 
-function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficients=false, ia =true, use_heuristic=false, verbose = true)
+function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficients=false, ia =true, use_heuristic=false, verbose = true, pts_per_dim=20)
     sys = result.kind[:problem]
     data = result.sol
     d = data.d
@@ -202,25 +206,48 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
     N_nodes = length(solutions)
 
     # Polynomial basis evaluations
+    #phi_table = Matrix{Float64}(undef, N_nodes, M)
+    #@threads for k in 1:N_nodes
+    #    ξs = xi_nodes[k]
+    #    for m_idx in 1:M
+    #        multi_idx = multi_indices[m_idx]
+    #        phi_table[k, m_idx] = prod(
+    #            legendre_polynomials(ξs[i])[multi_idx[i] + 1] for i in 1:d
+    #        )
+    #    end
+    #end
+    
     phi_table = Matrix{Float64}(undef, N_nodes, M)
     @threads for k in 1:N_nodes
         ξs = xi_nodes[k]
+        # compute all univariate Legendre‐values up to poly_order for each dimension
+        Pvals = [legendre_polynomialss(ξs[i], poly_order) for i in 1:d]
         for m_idx in 1:M
-            multi_idx = multi_indices[m_idx]
-            phi_table[k, m_idx] = prod(
-                legendre_polynomials(ξs[i])[multi_idx[i] + 1] for i in 1:d
-            )
+            mi = multi_indices[m_idx]
+            phi = 1.0
+            @inbounds for i in 1:d
+                # mi[i] goes from 0..poly_order, so +1 is in 1..poly_order+1
+                phi *= Pvals[i][ mi[i] + 1 ]
+            end
+            phi_table[k, m_idx] = phi
         end
     end
-
     norm_factors = [prod(((2 * i + 1) / 2) for i in mi) for mi in multi_indices]
-
-    legendre_intervals = [
-        IA.interval(1.0), IA.interval(-1.0, 1.0), IA.interval(-0.5, 1.0),
-        IA.interval(-1.0, 1.0), IA.interval(-0.4286, 1.0), IA.interval(-1.0, 1.0),
-        IA.interval(-0.4147, 1.0), IA.interval(-1.0, 1.0), IA.interval(-0.4097, 1.0),
-        IA.interval(-1.0, 1.0), IA.interval(-0.4073, 1.0)
-    ]
+    if poly_order <=10
+        legendre_intervals = [
+            IA.interval(1.0), IA.interval(-1.0, 1.0), IA.interval(-0.5, 1.0),
+            IA.interval(-1.0, 1.0), IA.interval(-0.4286, 1.0), IA.interval(-1.0, 1.0),
+            IA.interval(-0.4147, 1.0), IA.interval(-1.0, 1.0), IA.interval(-0.4097, 1.0),
+            IA.interval(-1.0, 1.0), IA.interval(-0.4073, 1.0)
+        ]
+    else
+        legendre_intervals = Vector{Interval{Float64}}(undef, poly_order+1)
+        legendre_intervals[1] = IA.interval(1.0)                     # P₀ ≡ 1
+        for n in 1:poly_order
+            legendre_intervals[n+1] = IA.interval(-1.0, 1.0)          # Pₙ ∈ [–1,1]
+        end
+    end
+#
     poly_interval = [
         prod(legendre_intervals[i+1] for i in mi) for mi in multi_indices
     ]
@@ -274,11 +301,11 @@ function calculate_bounds_pce(result::SimulationResult; idxs=nothing, coefficien
             end
 
             if !ia
-                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=20)
+                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=pts_per_dim)
                 lower_vals[t_idx] = minimum(yvals)
                 upper_vals[t_idx] = maximum(yvals)
             elseif use_heuristic && should_use_grid(coeff_dict, t_idx)
-                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=20)
+                yvals, _ = evaluate_pce_on_grid_custom(coeff_dict, t_idx; pts_per_dim=pts_per_dim)
                 lower_vals[t_idx] = minimum(yvals)
                 upper_vals[t_idx] = maximum(yvals)
                 
@@ -497,8 +524,17 @@ end
 
 
 # Evaluate multivariate basis Ψ_mi(ξ) = Π P_mi[i](ξ[i])
+#function multivariate_legendre_custom(mi::NTuple{D,Int}, ξ::NTuple{D,Float64}) where {D}
+#    prod(legendre_polynomials(ξ[i])[mi[i] + 1] for i in 1:D)
+#end
+
 function multivariate_legendre_custom(mi::NTuple{D,Int}, ξ::NTuple{D,Float64}) where {D}
-    prod(legendre_polynomials(ξ[i])[mi[i] + 1] for i in 1:D)
+    # find highest 1D order needed
+    max_n = maximum(mi)
+    # compute P₀…P_max_n at each ξ[i]
+    Pvals = ntuple(i -> legendre_polynomialss(ξ[i], max_n), D)
+    # take the product of the required entries
+    prod( Pvals[i][ mi[i] + 1 ] for i in 1:D )
 end
 
 

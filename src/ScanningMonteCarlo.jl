@@ -28,12 +28,12 @@ function solve_parameter_scan(sys, tspan, grid_size; var_dict=Dict(), dt=0.01, i
         p = Dict(param_keys[j] => combo[j] for j in 1:length(combo))
     
         prob = MTK.ODEProblem(local_sys, nothing, tspan, p, warn_initialize_determined = false)
-    
+        #prob = MTK.ODEProblem(sys, nothing, tspan, p, warn_initialize_determined = false)
         sol = DE.solve(prob, solver, saveat=ts)
         lock(lc)
         sols[i] = sol
         unlock(lc)
-        GC.gc()
+        #GC.gc()
     end
 
     return SimulationResult(

@@ -101,7 +101,7 @@ plot!(ylabel="x", xlabel="Time")
 ```
 
 The resulting plot compares all methods in a unified view. Scanning and Monte Carlo provide empirical bounds, PCE gives a fast and smooth approximation, and Taylor models give rigorous enclosures with mathematical guarantees. In this example, the bounds from Monte Carlo, Scanning, and PCE lie nearly on top of each other, and are visually indistinguishable in the plot.
-![Comparison of Methods](plot.svg)
+![Comparison of Methods](fig/plot.svg)
 
 
 ### Example 2: System with Time-Dependent Input
@@ -148,7 +148,7 @@ plot!(ylabel="x", xlabel="Time")
 ```
 ⚠️ Taylor model reachability is not supported for this example, since the current createIVP logic does not handle time-dependent expressions like sin(t) in the equations.
 
-![Comparison of Methods](plot2.svg)
+![Comparison of Methods](fig/plot2.svg)
 
 ### Example 3: Uncertain Output from a Time-Driven System
 
@@ -190,6 +190,4 @@ pce_bounds = calculate_bounds_pce(pce_sol, idxs=fol_variable_f.f, ia=false)
 plot_solution!(fig, pce_bounds, label="Bounds PCE", color = :blue)
 ```
 ⚠️ Taylor model reachability is not applicable for this setup, both due to the explicit time dependence and because bounds are being extracted for an observed variable, which is not supported by createIVP.
-![Comparison of Methods](plot3.svg)
-
-[![Build Status](https://github.com/rasmus.kovacs/IntervalSimulations.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/rasmus.kovacs/IntervalSimulations.jl/actions/workflows/CI.yml?query=branch%3Amain)
+![Comparison of Methods](fig/plot3.svg)
